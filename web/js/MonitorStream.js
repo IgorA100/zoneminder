@@ -536,6 +536,8 @@ function MonitorStream(monitorData) {
     );
     this.handlerEventListener['errorStream'] = manageEventListener.addEventListener(stream, 'error',
         (e) => {
+          clearTimeout(this.mseWaitingErrorReset);
+          console.warn(`Stream playback error for monitor ID=${this.id}.`, `ERROR: ${e.srcElement.error.message}`, e);
           this.writeTextInfoBlock("Error");
           this.streamErrorRegistration();
           this.restart(this.currentChannelStream);
@@ -2375,7 +2377,12 @@ function startMsePlay(context, videoEl, url) {
 
   context.mse = new MediaSource();
   videoEl.onplay = (event) => {
-    context.updateStreamInfo('', ''); //MSE
+    context.mseWaitingErrorReset = setTimeout(function(self) {
+      // If the video is in H.265, the browser may start playing (even if it doesn't support H.265) and an error may immediately appear.
+      // You need to wait a bit before resetting the error. This will allow for more accurate error counting.
+      self.updateStreamInfo('', ''); //MSE
+      self.resetCountStreamErrors(context.activePlayer);
+    }, 500, context);
     //getTracksFromStream(context); //MSE
     context.streamStartTime = (Date.now() / 1000).toFixed(2);
     if (videoEl.buffered.length > 0 && videoEl.currentTime < videoEl.buffered.end(videoEl.buffered.length - 1) - 0.1) {
