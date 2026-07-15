@@ -61,6 +61,18 @@ class Monitor : public std::enable_shared_from_this<Monitor> {
   friend class MonitorLinkExpression;
   friend class ONVIF;
 
+ private:
+  // ... существующие поля ...
+
+  struct KeyFrameCache {
+      std::shared_ptr<ZMBlobBuffer> buffer = nullptr;
+      uint64_t frame_id = 0;
+      double capture_time = 0.0;
+  } keyframe_cache_;
+
+  // Атомарный флаг: гарантирует видимость изменений между потоками zma (запись) и zms (чтение)
+  std::atomic<bool> cache_valid{false};
+
  public:
   typedef enum {
     QUERY=0,
