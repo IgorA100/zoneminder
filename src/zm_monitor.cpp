@@ -3405,23 +3405,8 @@ bool Monitor::Decode() {
         unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
         decoding_image_count++;
 
-        // === FIX GREEN SCREEN (#4866) - VERSION 2 ===
-        
-        // Если у нас есть аппаратный фрейм (CUDA/VAAPI/Vulkan), сначала перенесем его в CPU RAM
-        if (packet->in_frame && av_frame_get_hw_frames_ctx(packet->in_frame)) {
-            Debug(1, "Transferring HW frame to system memory for monitor %d", id);
-            int ret = packet->transfer_hwframe(nullptr); // nullptr заставит использовать context из камеры
-            if (ret < 0) {
-                Error("HW transfer failed for monitor %d", id);
-                packet->decoded = true;
-                packet->notify_all();
-                packetqueue.notify_all();
-                return false;
-            }
-        }
+        // === FIX GREEN SCREEN (#4866) - FINAL VERSION ===
 
-        // Проверяем формат пикселей. Если он нестандартный (например, NV12 от Keyframes),
-        // создаем временный Image правильного формата и копируем туда данные через Assign(AVFrame*).
         bool needs_conversion = (
             capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
             capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P &&
@@ -3432,25 +3417,32 @@ bool Monitor::Decode() {
             capture_image->PixFormat() != AV_PIX_FMT_GRAY8
         );
 
-        std::unique_ptr<Image> temp_holder; // Для автоматического удаления временной картинки
+        // Если формат нестандартный (зеленый квадрат), создаем временную копию правильного формата.
         if (needs_conversion && packet->in_frame) {
             Debug(1, "Converting format %s to YUV420P for SHM compatibility.", 
                   av_get_pix_fmt_name((AVPixelFormat)capture_image->PixFormat()));
             
-            // Создаем изображение того размера, что во фрейме
-            temp_holder.reset(new Image(
+            // Создаем временный стековый/кучный объект Image нужного размера
+            Image temp_image(
                 packet->in_frame->width, 
                 packet->in_frame->height, 
                 ZM_COLOUR_YUV420P, 
                 ZM_SUBPIX_ORDER_YUV420P
-            ));
+            );
 
-            // Используем корректный метод Assign(AVFrame*)
-            if (!temp_holder->Assign(packet->in_frame, convert_context)) {
+            // Используем корректный API Assign от AVFrame к Image.
+            // Это безопасно перенесет данные даже если исходник был NV12/P010.
+            if (!temp_image.Assign(packet->in_frame, convert_context)) {
                 Error("Failed to convert frame via SWScale for monitor %d", id);
-                // Если конвертация упала, попробуем отправить хотя бы исходный кадр
+                // В случае ошибки конвертации просто пропустим этот кадр,
+                // чтобы не записать мусор в Shared Memory.
+                packet->decoded = true;
+                packet->notify_all();
+                packetqueue.notify_all();
+                return false; 
             } else {
-                capture_image = temp_holder.get(); // Меняем указатель на сконвертированный
+                // Меняем указатель на наш сконвертированный буфер
+                capture_image = &temp_image; 
             }
         }
 
