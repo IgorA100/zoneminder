@@ -3405,8 +3405,7 @@ bool Monitor::Decode() {
             unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
             decoding_image_count++;
 
-            // === ГАРАНТИРОВАННОЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА (#4866) ===
-            
+            // === ГАРАНТИРОВАННОЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА (#4866) - FINAL ===
             bool needs_conversion = (
                 capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
                 capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P && 
@@ -3417,13 +3416,12 @@ bool Monitor::Decode() {
                 capture_image->PixFormat() != AV_PIX_FMT_GRAY8
             );
 
-            std::unique_ptr<Image> temp_img; // Для автоматического освобождения памяти при ошибке
+            std::unique_ptr<Image> temp_img;
 
             if (needs_conversion && packet->in_frame) {
                 Debug(1, "Converting format %s to YUV420P for SHM.", 
                       av_get_pix_fmt_name((AVPixelFormat)capture_image->PixFormat()));
 
-                // Создаем временный Image правильного формата (YUV420P)
                 temp_img.reset(new Image(
                     packet->in_frame->width, 
                     packet->in_frame->height, 
@@ -3431,17 +3429,23 @@ bool Monitor::Decode() {
                     ZM_SUBPIX_ORDER_YUV420P
                 ));
                 
-                // Прямой вызов sws_scale из ffmpeg/swscale.h
-                // Это самый надежный способ передачи данных между фреймами.
-                int h = sws_scale(
-                    convert_context,
-                    packet->in_frame->data,       // src data
-                    packet->in_frame->linesize,   // src linesize
-                    0,                            // slice y
-                    packet->in_frame->height,     // slice h
-                    temp_img->Buffer(),           // dst data (указатель на массив плоскостей)
-                    temp_img->Stride()            // dst linesize
-                );
+                size_t required_size = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, 
+                                                                temp_img->Width(), 
+                                                                temp_img->Height(), 
+                                                                32);
+                temp_img->CheckBuffer(required_size);
+
+                uint8_t *buffer = temp_img->Buffer()[0]; 
+                int dst_linesize[4] = {0};
+                dst_linesize[0] = ((temp_img->Width() + 31) / 32) * 32;
+                dst_linesize[1] = dst_linesize[0] / 2;
+                dst_linesize[2] = dst_linesize[0] / 2;
+
+                const uint8_t *src_data[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
+                int src_linesize[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
+                uint8_t *dst_data[4] = { buffer, buffer + (dst_linesize[0] * temp_img->Height()), buffer + (dst_linesize[0] * temp_img->Height() + (dst_linesize[1] * temp_img->Height() / 2)), nullptr };
+
+                int h = sws_scale(convert_context, src_data, src_linesize, 0, packet->in_frame->height, dst_data, dst_linesize);
 
                 if (h <= 0) {
                     Error("SWS Scale failed for monitor %d", id);
@@ -3451,11 +3455,9 @@ bool Monitor::Decode() {
                     return false;
                 }
                 
-                // Меняем рабочий указатель на сконвертированный кадр
                 capture_image = temp_img.get(); 
             }
 
-            // Записываем В ШМ уже готовый RGB/YUV буфер нужного формата
             WriteShmFrame(index, capture_image);
             shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
 
@@ -3463,14 +3465,14 @@ bool Monitor::Decode() {
             shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
             shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             shared_data->last_write_index = index;
-        }
 
-    // Warn if falling behind
-    auto lag = std::chrono::system_clock::now() - packet->timestamp;
-    if (lag > Seconds(ZM_WATCH_MAX_DELAY)) {
-      Warning("Decoding is not keeping up. %.2f seconds behind capture.", FPSeconds(lag).count());
-    }
-  }
+            // --- ВОЗВРАЩЕННЫЙ ВАМИ БЛОК ПРОВЕРКИ ЛАГА ---
+            auto lag = std::chrono::system_clock::now() - packet->timestamp;
+            if (lag > Seconds(ZM_WATCH_MAX_DELAY)) {
+              Warning("Decoding is not keeping up. %.2f seconds behind capture.", FPSeconds(lag).count());
+            }
+            // --- КОНЕЦ БЛОКА ---
+        }
 
   // Capture paths that deliver a raw Image without an ffmpeg decode (e.g.
   // LocalCamera/V4L2) leave packet->in_frame null even though the pixels are
