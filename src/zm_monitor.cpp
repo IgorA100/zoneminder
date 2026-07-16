@@ -3387,73 +3387,81 @@ bool Monitor::Decode() {
   // ===========================================================================
 
   if (packet->image) {
-    Image *capture_image = packet->image;
+        Image *capture_image = packet->image;
 
-    // Deinterlacing
-    if (deinterlacing_value) {
-      if (!applyDeinterlacing(packet, capture_image)) {
-        packet->decoded = true;
-        packet->notify_all();
-        packetqueue.notify_all();  // Wake up analysis thread
-        return false;
-      }
-    }
+        // Deinterlacing / Orientation / Privacy / Timestamp 
+        if (deinterlacing_value) {
+            if (!applyDeinterlacing(packet, capture_image)) {
+                packet->decoded = true;
+                packet->notify_all();
+                packetqueue.notify_all();
+                return false;
+            }
+        }
+        applyOrientation(capture_image);
+        if (privacy_bitmask) { capture_image->MaskPrivacy(privacy_bitmask); }
+        if (config.timestamp_on_capture) { TimestampImage(capture_image, packet->timestamp); }
 
-    // Rotation/flip
-    applyOrientation(capture_image);
+        unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
+        decoding_image_count++;
 
-    // Privacy masking
-    if (privacy_bitmask) {
-      capture_image->MaskPrivacy(privacy_bitmask);
-    }
-
-    // Timestamp overlay
-    if (config.timestamp_on_capture) {
-      TimestampImage(capture_image, packet->timestamp);
-    }
-
-    // Write to shared image buffer.
-    unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
-    decoding_image_count++;
-
-        bool can_passthrough = (
-            capture_image->PixFormat() == AV_PIX_FMT_YUV420P ||
-            capture_image->PixFormat() == AV_PIX_FMT_YUVJ420P || 
-            capture_image->PixFormat() == AV_PIX_FMT_RGB24 ||
-            capture_image->PixFormat() == AV_PIX_FMT_BGR24 ||
-            capture_image->PixFormat() == AV_PIX_FMT_RGBA ||
-            capture_image->PixFormat() == AV_PIX_FMT_BGRA ||
-            capture_image->PixFormat() == AV_PIX_FMT_GRAY8
-        );
-
-        if (!can_passthrough) {
-            Debug(1, "Green Screen Fix: Format %s not directly supported for SHM. Converting to YUV420P.", 
-                  av_get_pix_fmt_name((AVPixelFormat)capture_image->PixFormat()));
-            
-            // Создаем временный буфер гарантированно совместимого формата
-            Image temp_image(camera_width, camera_height, ZM_COLOUR_YUV420P, ZM_SUBPIX_ORDER_YUV420P);
-            
-            // Конвертируем через имеющийся контекст swscale (он уже создан в setupConvertContext)
-            if (convert_context) {
-                if (!temp_image.Assign(capture_image->Buffer(), convert_context)) {
-                    Error("Failed to convert frame format for monitor %d", id);
-                    // В случае ошибки конвертации лучше отправить пустой кадр, чем упасть
-                } else {
-                    // Заменяем указатель на сконвертированный кадр
-                    capture_image = &temp_image; 
-                }
+        // === FIX GREEN SCREEN (#4866) - VERSION 2 ===
+        
+        // Если у нас есть аппаратный фрейм (CUDA/VAAPI/Vulkan), сначала перенесем его в CPU RAM
+        if (packet->in_frame && av_frame_get_hw_frames_ctx(packet->in_frame)) {
+            Debug(1, "Transferring HW frame to system memory for monitor %d", id);
+            int ret = packet->transfer_hwframe(nullptr); // nullptr заставит использовать context из камеры
+            if (ret < 0) {
+                Error("HW transfer failed for monitor %d", id);
+                packet->decoded = true;
+                packet->notify_all();
+                packetqueue.notify_all();
+                return false;
             }
         }
 
-        // Теперь пишем в SHM данные ГАРАНТИРОВАННО правильного формата
+        // Проверяем формат пикселей. Если он нестандартный (например, NV12 от Keyframes),
+        // создаем временный Image правильного формата и копируем туда данные через Assign(AVFrame*).
+        bool needs_conversion = (
+            capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
+            capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P &&
+            capture_image->PixFormat() != AV_PIX_FMT_RGB24 &&
+            capture_image->PixFormat() != AV_PIX_FMT_BGR24 &&
+            capture_image->PixFormat() != AV_PIX_FMT_RGBA &&
+            capture_image->PixFormat() != AV_PIX_FMT_BGRA &&
+            capture_image->PixFormat() != AV_PIX_FMT_GRAY8
+        );
+
+        std::unique_ptr<Image> temp_holder; // Для автоматического удаления временной картинки
+        if (needs_conversion && packet->in_frame) {
+            Debug(1, "Converting format %s to YUV420P for SHM compatibility.", 
+                  av_get_pix_fmt_name((AVPixelFormat)capture_image->PixFormat()));
+            
+            // Создаем изображение того размера, что во фрейме
+            temp_holder.reset(new Image(
+                packet->in_frame->width, 
+                packet->in_frame->height, 
+                ZM_COLOUR_YUV420P, 
+                ZM_SUBPIX_ORDER_YUV420P
+            ));
+
+            // Используем корректный метод Assign(AVFrame*)
+            if (!temp_holder->Assign(packet->in_frame, convert_context)) {
+                Error("Failed to convert frame via SWScale for monitor %d", id);
+                // Если конвертация упала, попробуем отправить хотя бы исходный кадр
+            } else {
+                capture_image = temp_holder.get(); // Меняем указатель на сконвертированный
+            }
+        }
+
         WriteShmFrame(index, capture_image);
         shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
 
-        // Обновляем метаданные ПОСЛЕ успешной записи байтов
+        // Обновляем метаданные ПОСЛЕ записи байтов
         shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
         shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        shared_data->last_write_index = index; 
- 
+        shared_data->last_write_index = index;
+
     // Warn if falling behind
     auto lag = std::chrono::system_clock::now() - packet->timestamp;
     if (lag > Seconds(ZM_WATCH_MAX_DELAY)) {
