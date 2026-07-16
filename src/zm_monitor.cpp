@@ -3411,15 +3411,45 @@ bool Monitor::Decode() {
             unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
             decoding_image_count++;
 
-            // === МИНИМАЛЬНОЕ ИСПРАВЛЕНИЕ ДЛЯ GREEN SCREEN ===
-            // Убираем ВСЮ логику создания temp_img и sws_scale.
-            // Просто проверяем, не является ли формат "битым" (None), и если да - задаем дефолтный YUV420P через public setter.
-            
-            if (capture_image->PixFormat() == AV_PIX_FMT_NONE && packet->in_frame) {
-                Debug(1, "Fixing invalid PixFormat to YUV420P");
-                // Используем ПУБЛИЧНЫЙ метод-сеттер, который есть в вашем .h файле
-                capture_image->AVPixFormat(AV_PIX_FMT_YUV420P); 
+            // === ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА ПРИ DECODING_KEYFRAMES ===
+            // Проблема: Frame имеет один PixFormat, а Buffer у Image - другой.
+            // Решение: Пересоздаем буфер изображения под формат кадра.
+
+            bool buffer_needs_resize = (
+                (capture_image->Width() != static_cast<unsigned int>(packet->in_frame->width)) ||
+                (capture_image->Height() != static_cast<unsigned int>(packet->in_frame->height)) ||
+                (capture_image->PixFormat() != packet->in_frame->format)
+            );
+
+            if (buffer_needs_reize) {
+                Debug(1, "Monitor %d: Resizing image buffer to match frame format: %s (%dx%d)", 
+                      id, av_get_pix_fmt_name(packet->in_frame->format), 
+                      packet->in_frame->width, packet->in_frame->height);
+
+                // Принудительно устанавливаем параметры изображения объекта
+                capture_image->width = packet->in_frame->width;
+                capture_image->height = packet->in_frame->height;
+                
+                // Используем публичный метод-сеттер для формата (вместо прямого доступа к protected полю)
+                capture_image->AVPixFormat(static_cast<AVPixelFormat>(packet->in_frame->format));
+                
+                // Вызываем Resize. Это освободит старый buffer и аллоцирует новый правильного размера.
+                capture_image->Resize();
             }
+
+            // Копируем данные напрямую. Теперь размеры совпадают, зеленого квадрата не будет.
+            uint8_t *dst_planes[4] = {nullptr};
+            int dst_strides[4] = {0};
+            
+            // Заполняем указатели плоскостей нашего destination-буфера
+            av_image_fill_arrays(dst_planes, dst_strides, capture_image->Buffer(), 
+                                 capture_image->AVPixFormat(), capture_image->Width(), capture_image->Height(), 32);
+
+            const uint8_t *src_data[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
+            const int src_linesize[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
+
+            sws_scale(sws_convert_context, src_data, packet->in_frame->linesize, 
+                      0, packet->in_frame->height, dst_data, dst_strides);
 
             WriteShmFrame(index, capture_image);
             shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
