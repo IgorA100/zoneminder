@@ -3389,7 +3389,7 @@ bool Monitor::Decode() {
         if (packet->image) {
             Image *capture_image = packet->image;
 
-            // Deinterlacing / Orientation / Privacy / Timestamp 
+            // Deinterlacing / Orientation 
             if (deinterlacing_value) {
                 if (!applyDeinterlacing(packet, capture_image)) {
                     packet->decoded = true;
@@ -3398,30 +3398,20 @@ bool Monitor::Decode() {
                     return false;
                 }
             }
-            
             applyOrientation(capture_image);
             
-            // --- ИСПРАВЛЕНИЕ ОШИБКИ ВЫЗОВА ФУНКЦИЙ ---
-            // Передаем ширину, высоту и буфер согласно сигнатуре класса Image
-            if (privacy_bitmask) {
-                capture_image->MaskPrivacy(
-                    capture_image->Buffer(), 
-                    capture_image->Width(), 
-                    capture_image->Height(), 
-                    privacy_bitmask
-                );
+            // Маска приватности (оставляем как у вас было)
+            if (privacy_bitmask) { 
+                capture_image->MaskPrivacy(privacy_bitmask); 
             }
-            
-            if (config.timestamp_on_capture) {
-                capture_image->TimestampImage(
-                    SystemTimePoint(zm::chrono::duration_cast<Microseconds>(shared_timestamps[shared_data->last_write_index]))
-                );
+            if (config.timestamp_on_capture) { 
+                TimestampImage(capture_image, packet->timestamp); 
             }
 
             unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
             decoding_image_count++;
 
-            // === РАБОЧЕЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА (#4866) ===
+            // === ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА (БЕЗ ОШИБОК ТИПОВ) ===
             bool needs_conversion = (
                 capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
                 capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P && 
@@ -3435,39 +3425,62 @@ bool Monitor::Decode() {
             std::unique_ptr<Image> temp_img;
 
             if (needs_conversion && packet->in_frame) {
-                Debug(1, "Converting format to YUV420P for SHM.");
                 
-                // Устанавливаем целевой формат в самом объекте
-                capture_image->AVPixFormat(AV_PIX_FMT_YUV420P);
+                Debug(1, "Converting format to YUV420P for SHM.");
+
+                // Создаем временный буфер через фабричный метод Zoneminder
+                // Это гарантирует правильный расчет размера под любой формат
+                temp_img.reset(new Image(
+                    packet->in_frame->width, 
+                    packet->in_frame->height, 
+                    ZM_COLOUR_YUV420P, 
+                    ZM_SUBPIX_ORDER_YUV420P
+                ));
+                
+                size_t required_size = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, 
+                                                                temp_img->Width(), 
+                                                                temp_img->Height(), 
+                                                                32);
+                
+                // Выделяем память через публичный интерфейс класса (без CheckBuffer)
+                uint8_t *temp_buf = temp_img->WriteBuffer(temp_img->Width(), temp_img->Height(), 
+                                                          temp_img->Colours(), temp_img->SubpixelOrder());
+                if (!temp_buf) {
+                    Error("Failed to allocate buffer for color conversion");
+                    return false;
+                }
+
+                // Настройка плоскостей назначения (куда копируем результат sws_scale)
+                uint8_t *dst_planes[4] = {nullptr};
+                int dst_strides[4] = {0};
+                av_image_fill_arrays(dst_planes, dst_strides, temp_img->Buffer(), 
+                                     temp_img->AVPixFormat(), temp_img->Width(), temp_img->Height(), 32);
 
                 SwsContext *sws_ctx = sws_getContext(
                     packet->in_frame->width, packet->in_frame->height, packet->in_frame->format,
-                    capture_image->Width(), capture_image->Height(), 
-                    capture_image->AVPixFormat(),
+                    temp_img->Width(), temp_img->Height(), 
+                    temp_img->AVPixFormat(),
                     SWS_BILINEAR, NULL, NULL, NULL);
 
                 if (sws_ctx) {
                     const uint8_t *src_slices[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
                     const int src_stride[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
                     
-                    uint8_t *dst_planes[4] = {nullptr};
-                    int dst_strides[4] = {0};
-                    
-                    av_image_fill_arrays(dst_planes, dst_strides, capture_image->Buffer(), 
-                                         capture_image->AVPixFormat(), capture_image->Width(), capture_image->Height(), 32);
-
                     sws_scale(sws_ctx, src_slices, packet->in_frame->linesize, 0, packet->in_frame->height, dst_data, dst_linesize);
                     sws_freeContext(sws_ctx);
                 } else {
                     Error("Unable to create SWS Context for monitor %d", id);
                     return false;
                 }
+                
+                // Переключаем рабочий указатель на сконвертированный кадр
+                capture_image = temp_img.get(); 
             }
 
             WriteShmFrame(index, capture_image);
             shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
 
-            // Обновляем метаданные
+            // Обновляем метаданные ПОСЛЕ успешной записи байтов
             shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
             shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             shared_data->last_write_index = index;
@@ -3477,7 +3490,6 @@ bool Monitor::Decode() {
               Warning("Decoding is not keeping up. %.2f seconds behind capture.", FPSeconds(lag).count());
             }
         }
-
   // Capture paths that deliver a raw Image without an ffmpeg decode (e.g.
   // LocalCamera/V4L2) leave packet->in_frame null even though the pixels are
   // already present. Wrap the image's planes in an AVFrame — no copy, just
