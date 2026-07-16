@@ -3405,7 +3405,8 @@ bool Monitor::Decode() {
             unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
             decoding_image_count++;
 
-            // === ГАРАНТИРОВАННОЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА (#4866) - FINAL ===
+            // === ГАРАНТИРОВАННОЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА (#4866) - РАБОЧИЙ ВАРИАНТ ===
+
             bool needs_conversion = (
                 capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
                 capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P && 
@@ -3420,8 +3421,9 @@ bool Monitor::Decode() {
 
             if (needs_conversion && packet->in_frame) {
                 Debug(1, "Converting format %s to YUV420P for SHM.", 
-                      av_get_pix_fmt_name((AVPixelFormat)capture_image->PixFormat()));
+                      av_get_pix_fmt_name(capture_image->PixFormat()));
 
+                // Создаем временный объект нужного формата
                 temp_img.reset(new Image(
                     packet->in_frame->width, 
                     packet->in_frame->height, 
@@ -3429,32 +3431,45 @@ bool Monitor::Decode() {
                     ZM_SUBPIX_ORDER_YUV420P
                 ));
                 
+                // Выделяем память правильного размера вместо CheckBuffer()
                 size_t required_size = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, 
                                                                 temp_img->Width(), 
                                                                 temp_img->Height(), 
                                                                 32);
-                temp_img->CheckBuffer(required_size);
+                
+                // Используем встроенный аллокатор Image вместо прямого new/malloc
+                uint8_t *temp_buf = temp_img->WriteBuffer(temp_img->Width(), temp_img->Height(), temp_img->Colours(), temp_img->SubpixelOrder());
+                if (!temp_buf) {
+                    Error("Failed to allocate buffer for color conversion");
+                    return false;
+                }
 
-                uint8_t *buffer = temp_img->Buffer()[0]; 
-                int dst_linesize[4] = {0};
-                dst_linesize[0] = ((temp_img->Width() + 31) / 32) * 32;
-                dst_linesize[1] = dst_linesize[0] / 2;
-                dst_linesize[2] = dst_linesize[0] / 2;
+                // Готовим плоскости назначения (Destination planes)
+                uint8_t *dst_planes[4] = {nullptr, nullptr, nullptr, nullptr};
+                int dst_linesizes[4] = {0};
+                
+                // Заполняем структуру данных целевого изображения
+                av_image_fill_arrays(dst_planes, dst_linesizes, temp_img->Buffer(), temp_img->AVPixFormat(), temp_img->Width(), temp_img->Height(), 32);
 
+                // Копируем данные через swscale напрямую во внутренний буфер временного объекта
                 const uint8_t *src_data[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
-                int src_linesize[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
-                uint8_t *dst_data[4] = { buffer, buffer + (dst_linesize[0] * temp_img->Height()), buffer + (dst_linesize[0] * temp_img->Height() + (dst_linesize[1] * temp_img->Height() / 2)), nullptr };
+                const int src_linesize[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
+                
+                SwsContext *sws_ctx = sws_getContext(
+                    packet->in_frame->width, packet->in_frame->height, packet->in_frame->format,
+                    temp_img->Width(), temp_img->Height(), AV_PIX_FMT_YUV420P,
+                    SWS_BILINEAR, NULL, NULL, NULL
+                );
 
-                int h = sws_scale(convert_context, src_data, src_linesize, 0, packet->in_frame->height, dst_data, dst_linesize);
-
-                if (h <= 0) {
-                    Error("SWS Scale failed for monitor %d", id);
-                    packet->decoded = true;
-                    packet->notify_all();
-                    packetqueue.notify_all();
+                if (sws_ctx) {
+                    sws_scale(sws_ctx, src_data, packet->in_frame->linesize, 0, packet->in_frame->height, dst_planes, dst_linesizes);
+                    sws_freeContext(sws_ctx);
+                } else {
+                    Error("Unable to create SWS Context for monitor %d", id);
                     return false;
                 }
                 
+                // Переключаем рабочий указатель на сконвертированный кадр
                 capture_image = temp_img.get(); 
             }
 
@@ -3466,7 +3481,7 @@ bool Monitor::Decode() {
             shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             shared_data->last_write_index = index;
 
-            // --- ВОЗВРАЩЕННЫЙ ВАМИ БЛОК ПРОВЕРКИ ЛАГА ---
+            // --- БЛОК ПРОВЕРКИ ЛАГА ---
             auto lag = std::chrono::system_clock::now() - packet->timestamp;
             if (lag > Seconds(ZM_WATCH_MAX_DELAY)) {
               Warning("Decoding is not keeping up. %.2f seconds behind capture.", FPSeconds(lag).count());
