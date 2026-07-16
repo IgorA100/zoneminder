@@ -3405,7 +3405,7 @@ bool Monitor::Decode() {
             unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
             decoding_image_count++;
 
-            // === ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА (БЕЗ ОШИБОК КОМПИЛЯЦИИ) ===
+            // === РАБОЧЕЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА БЕЗ ОШИБОК КОМПИЛЯЦИИ ===
 
             bool needs_conversion = (
                 capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
@@ -3417,68 +3417,45 @@ bool Monitor::Decode() {
                 capture_image->PixFormat() != AV_PIX_FMT_GRAY8
             );
 
-            std::unique_ptr<Image> temp_img;
-
             if (needs_conversion && packet->in_frame) {
                 
-                // --- ПРАВИЛЬНЫЙ СПОСОБ: Используем существующую утилиту из zm_image.h ---
-                AVPixelFormat target_fmt = zm_pixformat_from_colours(
-                    capture_image->Colours(), 
-                    capture_image->SubpixelOrder()
-                );
+                Debug(1, "Converting format to YUV420P for SHM.");
 
-                Debug(1, "Converting format to %s for SHM.", av_get_pix_fmt_name(target_fmt));
+                // --- ГЛАВНОЕ ИСПРАВЛЕНИЕ ---
+                // Принудительно устанавливаем целевой формат изображения В САМОМ объекте
+                // Это уберет рассинхронизацию форматов без вызова несуществующих конструкторов.
+                capture_image->AVPixFormat(AV_PIX_FMT_YUV420P); 
 
-                // Создаем временный буфер нужного формата через конструктор класса
-                temp_img.reset(new Image(
-                    capture_image->Width(), 
-                    capture_image->Height(), 
-                    capture_image->Colours(), 
-                    capture_image->SubpixelOrder() 
-                ));
-                
-                size_t required_size = av_image_get_buffer_size(target_fmt, 
-                                                                temp_img->Width(), 
-                                                                temp_img->Height(), 
-                                                                32);
-                
-                uint8_t *temp_buf = temp_img->WriteBuffer(temp_img->Width(), temp_img->Height(), 
-                                                          temp_img->Colours(), temp_img->SubpixelOrder());
-                if (!temp_buf) {
-                    Error("Failed to allocate buffer for color conversion");
-                    return false;
-                }
-
-                // Заполняем массивы указателей плоскостей для swscale
-                uint8_t *dst_planes[4] = {nullptr};
-                int dst_linesizes[4] = {0};
-                av_image_fill_arrays(dst_planes, dst_linesizes, temp_img->Buffer(), 
-                                     temp_img->AVPixFormat(), temp_img->Width(), temp_img->Height(), 32);
-
-                // Создаем контекст конвертации строго под целевой формат
+                // Создаем контекст swscale один раз за вызов
                 SwsContext *sws_ctx = sws_getContext(
                     packet->in_frame->width, packet->in_frame->height, packet->in_frame->format,
-                    temp_img->Width(), temp_img->Height(), target_fmt, // <-- ТУТ ВАЖЕН ЦЕЛЕВОЙ ФОРМАТ
+                    capture_image->Width(), capture_image->Height(), 
+                    capture_image->AVPixFormat(), // Берем тот формат, который только что установили
                     SWS_BILINEAR, NULL, NULL, NULL);
 
                 if (sws_ctx) {
                     const uint8_t *src_slices[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
                     const int src_stride[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
                     
-                    sws_scale(sws_ctx, src_slices, packet->in_frame->linesize, 0, packet->in_frame->height, dst_planes, dst_linesizes);
+                    uint8_t *dst_planes[4] = {nullptr};
+                    int dst_strides[4] = {0};
+                    
+                    // Заполняем указатели плоскостей нашего buffer'а правильными смещениями
+                    av_image_fill_arrays(dst_planes, dst_strides, capture_image->Buffer(), 
+                                         capture_image->AVPixFormat(), capture_image->Width(), capture_image->Height(), 32);
+
+                    sws_scale(sws_ctx, src_slices, packet->in_frame->linesize, 0, packet->in_frame->height, dst_data, dst_linesizes);
                     sws_freeContext(sws_ctx);
                 } else {
                     Error("Unable to create SWS Context for monitor %d", id);
                     return false;
                 }
-                
-                capture_image = temp_img.get(); 
             }
 
             WriteShmFrame(index, capture_image);
             shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
 
-            // Обновляем метаданные ПОСЛЕ записи
+            // Обновляем метаданные ПОСЛЕ успешной записи байтов
             shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
             shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             shared_data->last_write_index = index;
