@@ -3418,8 +3418,8 @@ bool Monitor::Decode() {
     WriteShmFrame(index, capture_image);
     shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
     shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
-    shared_data->last_write_index = index;
     shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    shared_data->last_write_index = index; 
 
     // Warn if falling behind
     auto lag = std::chrono::system_clock::now() - packet->timestamp;
