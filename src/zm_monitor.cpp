@@ -3386,91 +3386,47 @@ bool Monitor::Decode() {
   // PHASE 5: Process the RGB image (deinterlace, rotate, privacy, timestamp)
   // ===========================================================================
 
+  if (packet->image) {
+    Image *capture_image = packet->image;
 
-        if ( packet->image ) {
-            Image *capture_image = packet->image;
+    // Deinterlacing
+    if (deinterlacing_value) {
+      if (!applyDeinterlacing(packet, capture_image)) {
+        packet->decoded = true;
+        packet->notify_all();
+        packetqueue.notify_all();  // Wake up analysis thread
+        return false;
+      }
+    }
 
-            // Deinterlacing / Orientation 
-            if ( deinterlacing_value ) {
-                if ( !applyDeinterlacing( packet, capture_image ) ) {
-                    packet->decoded = true;
-                    packet->notify_all();
-                    packetqueue.notify_all();
-                    return false;
-                }
-            }
-            applyOrientation( capture_image );
-            
-            // Маска приватности (оставляем вашу строку)
-            if ( privacy_bitmask ) { 
-                capture_image->MaskPrivacy( privacy_bitmask ); 
-            }
-            if ( config.timestamp_on_capture ) { 
-                TimestampImage( capture_image, packet->timestamp ); 
-            }
+    // Rotation/flip
+    applyOrientation(capture_image);
 
-            unsigned int index = ( shared_data->last_write_index + 1 ) % image_buffer_count;
-            decoding_image_count++;
+    // Privacy masking
+    if (privacy_bitmask) {
+      capture_image->MaskPrivacy(privacy_bitmask);
+    }
 
-            // === ФИНАЛЬНОЕ РАБОЧЕЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА ===
+    // Timestamp overlay
+    if (config.timestamp_on_capture) {
+      TimestampImage(capture_image, packet->timestamp);
+    }
 
-            // Проверяем, нужно ли менять размер буфера под формат кадра
-            bool buffer_needs_resize = (
-                (capture_image->Width() != static_cast<unsigned int>(packet->in_frame->width)) ||
-                (capture_image->Height() != static_cast<unsigned int>(packet->in_frame->height)) ||
-                (capture_image->PixFormat() != static_cast<AVPixelFormat>(packet->in_frame->format))
-            );
+    // Write to shared image buffer.
+    unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
+    decoding_image_count++;
+    WriteShmFrame(index, capture_image);
+    shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
+    shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
+    shared_data->last_write_index = index;
+    shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
-            if (buffer_needs_resize) {
-                Debug(1, "Monitor %d: Resizing image buffer to match frame format.", id);
-
-                // Устанавливаем размеры через Публичные Сеттеры (Set-функции)
-                capture_image->Width(packet->in_frame->width);      // Используем Setter!
-                capture_image->Height(packet->in_frame->height);    // Используем Setter!
-                
-                // Меняем формат пикселей через публичный метод
-                capture_image->AVPixFormat(static_cast<AVPixelFormat>(packet->in_frame->format)); 
-                
-                // Пересоздаем внутренний буфер данных с новыми параметрами
-                capture_image->Resize(); 
-            }
-
-            // --- Конвертация цвета ---
-            uint8_t *dst_planes[4] = {nullptr};
-            int dst_strides[4] = {0};
-            
-            av_image_fill_arrays(dst_planes, dst_strides, capture_image->Buffer(), 
-                                 capture_image->AVPixFormat(), capture_image->Width(), capture_image->Height(), 32);
-
-            const uint8_t *src_data[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
-            const int src_linesize[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
-
-            struct SwsContext *local_sws_ctx = sws_getContext(
-                packet->in_frame->width, packet->in_frame->height, 
-                static_cast<AVPixelFormat>(packet->in_frame->format),
-                capture_image->Width(), capture_image->Height(), 
-                capture_image->AVPixFormat(),
-                SWS_BILINEAR, NULL, NULL, NULL);
-
-            if (local_sws_ctx) {
-                sws_scale(local_sws_ctx, src_data, packet->in_frame->linesize, 
-                          0, packet->in_frame->height, dst_data, dst_strides);
-                sws_freeContext(local_sws_ctx);
-            }
-
-            WriteShmFrame(index, capture_image);
-            shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
-
-            // Обновляем метаданные ПОСЛЕ успешной записи байтов
-            shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
-            shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-            shared_data->last_write_index = index;
-
-            auto lag = std::chrono::system_clock::now() - packet->timestamp;
-            if (lag > Seconds(ZM_WATCH_MAX_DELAY)) {
-              Warning("Decoding is not keeping up. %.2f seconds behind capture.", FPSeconds(lag).count());
-            }
-        }
+    // Warn if falling behind
+    auto lag = std::chrono::system_clock::now() - packet->timestamp;
+    if (lag > Seconds(ZM_WATCH_MAX_DELAY)) {
+      Warning("Decoding is not keeping up. %.2f seconds behind capture.", FPSeconds(lag).count());
+    }
+  }
 
   // Capture paths that deliver a raw Image without an ffmpeg decode (e.g.
   // LocalCamera/V4L2) leave packet->in_frame null even though the pixels are
@@ -4255,4 +4211,3 @@ StringVector Monitor::GroupNames() {
   }
   return groupnames;
 } // end Monitor::GroupNames()
-
