@@ -3387,32 +3387,34 @@ bool Monitor::Decode() {
   // ===========================================================================
 
 
-        if (packet->image) {
+        if ( packet->image ) {
             Image *capture_image = packet->image;
 
             // Deinterlacing / Orientation 
-            if (deinterlacing_value) {
-                if (!applyDeinterlacing(packet, capture_image)) {
+            if ( deinterlacing_value ) {
+                if ( !applyDeinterlacing( packet, capture_image ) ) {
                     packet->decoded = true;
                     packet->notify_all();
                     packetqueue.notify_all();
                     return false;
                 }
             }
-            applyOrientation(capture_image);
-            if (privacy_bitmask) { 
-                capture_image->MaskPrivacy(privacy_bitmask); 
+            applyOrientation( capture_image );
+            
+            // Маска приватности (оставляем вашу строку)
+            if ( privacy_bitmask ) { 
+                capture_image->MaskPrivacy( privacy_bitmask ); 
             }
-            if (config.timestamp_on_capture) { 
-                TimestampImage(capture_image, packet->timestamp); 
+            if ( config.timestamp_on_capture ) { 
+                TimestampImage( capture_image, packet->timestamp ); 
             }
 
-            unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
+            unsigned int index = ( shared_data->last_write_index + 1 ) % image_buffer_count;
             decoding_image_count++;
 
-            // === ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА ПРИ DECODING_KEYFRAMES ===
+            // === ФИНАЛЬНОЕ РАБОЧЕЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА ===
 
-            // Проверяем, отличается ли входящий кадр от текущего буфера изображения
+            // Проверяем, нужно ли менять размер буфера под формат кадра
             bool buffer_needs_resize = (
                 (capture_image->Width() != static_cast<unsigned int>(packet->in_frame->width)) ||
                 (capture_image->Height() != static_cast<unsigned int>(packet->in_frame->height)) ||
@@ -3420,18 +3422,16 @@ bool Monitor::Decode() {
             );
 
             if (buffer_needs_resize) {
-                Debug(1, "Monitor %d: Resizing image buffer to match frame format: %s (%dx%d)", 
-                      id, av_get_pix_fmt_name(static_cast<AVPixelFormat>(packet->in_frame->format)), 
-                      packet->in_frame->width, packet->in_frame->height);
+                Debug(1, "Monitor %d: Resizing image buffer to match frame format.", id);
 
-                // Устанавливаем новые размеры и формат через публичные методы/сеттеры
-                capture_image->width = packet->in_frame->width;
-                capture_image->height = packet->in_frame->height;
+                // Устанавливаем размеры через Публичные Сеттеры (Set-функции)
+                capture_image->Width(packet->in_frame->width);      // Используем Setter!
+                capture_image->Height(packet->in_frame->height);    // Используем Setter!
                 
-                // Используем public setter для формата пикселей
-                capture_image->AVPixFormat(static_cast<AVPixelFormat>(packet->in_frame->format));
+                // Меняем формат пикселей через публичный метод
+                capture_image->AVPixFormat(static_cast<AVPixelFormat>(packet->in_frame->format)); 
                 
-                // Пересоздаем внутренний буфер под новый размер/формат
+                // Пересоздаем внутренний буфер данных с новыми параметрами
                 capture_image->Resize(); 
             }
 
@@ -3439,14 +3439,12 @@ bool Monitor::Decode() {
             uint8_t *dst_planes[4] = {nullptr};
             int dst_strides[4] = {0};
             
-            // Заполняем указатели плоскостей нашего destination-буфера
             av_image_fill_arrays(dst_planes, dst_strides, capture_image->Buffer(), 
                                  capture_image->AVPixFormat(), capture_image->Width(), capture_image->Height(), 32);
 
             const uint8_t *src_data[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
             const int src_linesize[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
 
-            // Создаем временный swscale только на время этой операции
             struct SwsContext *local_sws_ctx = sws_getContext(
                 packet->in_frame->width, packet->in_frame->height, 
                 static_cast<AVPixelFormat>(packet->in_frame->format),
@@ -3458,9 +3456,6 @@ bool Monitor::Decode() {
                 sws_scale(local_sws_ctx, src_data, packet->in_frame->linesize, 
                           0, packet->in_frame->height, dst_data, dst_strides);
                 sws_freeContext(local_sws_ctx);
-            } else {
-                Error("Unable to create local SWS Context for monitor %d", id);
-                // Даже если свскейл не создался, запишем что есть, чтобы избежать зависания индекса
             }
 
             WriteShmFrame(index, capture_image);
