@@ -3386,73 +3386,84 @@ bool Monitor::Decode() {
   // PHASE 5: Process the RGB image (deinterlace, rotate, privacy, timestamp)
   // ===========================================================================
 
-  if (packet->image) {
-        Image *capture_image = packet->image;
+        if (packet->image) {
+            Image *capture_image = packet->image;
 
-        // Deinterlacing / Orientation / Privacy / Timestamp 
-        if (deinterlacing_value) {
-            if (!applyDeinterlacing(packet, capture_image)) {
-                packet->decoded = true;
-                packet->notify_all();
-                packetqueue.notify_all();
-                return false;
+            // Deinterlacing / Orientation / Privacy / Timestamp 
+            if (deinterlacing_value) {
+                if (!applyDeinterlacing(packet, capture_image)) {
+                    packet->decoded = true;
+                    packet->notify_all();
+                    packetqueue.notify_all();
+                    return false;
+                }
             }
-        }
-        applyOrientation(capture_image);
-        if (privacy_bitmask) { capture_image->MaskPrivacy(privacy_bitmask); }
-        if (config.timestamp_on_capture) { TimestampImage(capture_image, packet->timestamp); }
+            applyOrientation(capture_image);
+            if (privacy_bitmask) { capture_image->MaskPrivacy(privacy_bitmask); }
+            if (config.timestamp_on_capture) { TimestampImage(capture_image, packet->timestamp); }
 
-        unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
-        decoding_image_count++;
+            unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
+            decoding_image_count++;
 
-        // === FIX GREEN SCREEN (#4866) - FINAL VERSION ===
-
-        bool needs_conversion = (
-            capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
-            capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P &&
-            capture_image->PixFormat() != AV_PIX_FMT_RGB24 &&
-            capture_image->PixFormat() != AV_PIX_FMT_BGR24 &&
-            capture_image->PixFormat() != AV_PIX_FMT_RGBA &&
-            capture_image->PixFormat() != AV_PIX_FMT_BGRA &&
-            capture_image->PixFormat() != AV_PIX_FMT_GRAY8
-        );
-
-        // Если формат нестандартный (зеленый квадрат), создаем временную копию правильного формата.
-        if (needs_conversion && packet->in_frame) {
-            Debug(1, "Converting format %s to YUV420P for SHM compatibility.", 
-                  av_get_pix_fmt_name((AVPixelFormat)capture_image->PixFormat()));
+            // === ГАРАНТИРОВАННОЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА (#4866) ===
             
-            // Создаем временный стековый/кучный объект Image нужного размера
-            Image temp_image(
-                packet->in_frame->width, 
-                packet->in_frame->height, 
-                ZM_COLOUR_YUV420P, 
-                ZM_SUBPIX_ORDER_YUV420P
+            bool needs_conversion = (
+                capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
+                capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P && 
+                capture_image->PixFormat() != AV_PIX_FMT_RGB24 &&
+                capture_image->PixFormat() != AV_PIX_FMT_BGR24 &&
+                capture_image->PixFormat() != AV_PIX_FMT_RGBA &&
+                capture_image->PixFormat() != AV_PIX_FMT_BGRA &&
+                capture_image->PixFormat() != AV_PIX_FMT_GRAY8
             );
 
-            // Используем корректный API Assign от AVFrame к Image.
-            // Это безопасно перенесет данные даже если исходник был NV12/P010.
-            if (!temp_image.Assign(packet->in_frame, convert_context)) {
-                Error("Failed to convert frame via SWScale for monitor %d", id);
-                // В случае ошибки конвертации просто пропустим этот кадр,
-                // чтобы не записать мусор в Shared Memory.
-                packet->decoded = true;
-                packet->notify_all();
-                packetqueue.notify_all();
-                return false; 
-            } else {
-                // Меняем указатель на наш сконвертированный буфер
-                capture_image = &temp_image; 
+            std::unique_ptr<Image> temp_img; // Для автоматического освобождения памяти при ошибке
+
+            if (needs_conversion && packet->in_frame) {
+                Debug(1, "Converting format %s to YUV420P for SHM.", 
+                      av_get_pix_fmt_name((AVPixelFormat)capture_image->PixFormat()));
+
+                // Создаем временный Image правильного формата (YUV420P)
+                temp_img.reset(new Image(
+                    packet->in_frame->width, 
+                    packet->in_frame->height, 
+                    ZM_COLOUR_YUV420P, 
+                    ZM_SUBPIX_ORDER_YUV420P
+                ));
+                
+                // Прямой вызов sws_scale из ffmpeg/swscale.h
+                // Это самый надежный способ передачи данных между фреймами.
+                int h = sws_scale(
+                    convert_context,
+                    packet->in_frame->data,       // src data
+                    packet->in_frame->linesize,   // src linesize
+                    0,                            // slice y
+                    packet->in_frame->height,     // slice h
+                    temp_img->Buffer(),           // dst data (указатель на массив плоскостей)
+                    temp_img->Stride()            // dst linesize
+                );
+
+                if (h <= 0) {
+                    Error("SWS Scale failed for monitor %d", id);
+                    packet->decoded = true;
+                    packet->notify_all();
+                    packetqueue.notify_all();
+                    return false;
+                }
+                
+                // Меняем рабочий указатель на сконвертированный кадр
+                capture_image = temp_img.get(); 
             }
+
+            // Записываем В ШМ уже готовый RGB/YUV буфер нужного формата
+            WriteShmFrame(index, capture_image);
+            shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
+
+            // Обновляем метаданные ПОСЛЕ успешной записи байтов
+            shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
+            shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            shared_data->last_write_index = index;
         }
-
-        WriteShmFrame(index, capture_image);
-        shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
-
-        // Обновляем метаданные ПОСЛЕ записи байтов
-        shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
-        shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        shared_data->last_write_index = index;
 
     // Warn if falling behind
     auto lag = std::chrono::system_clock::now() - packet->timestamp;
