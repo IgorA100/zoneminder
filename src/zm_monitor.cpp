@@ -3202,7 +3202,11 @@ Debug(2, "PHASE 1 decoder_queue.size = %zu", decoder_queue.size());
   // PHASE 2: Get a new packet and send it to decoder (if needed)
   // ===========================================================================
   // Only if we didn't receive a frame above
-Debug(2, "PHASE 2 packet->codec_type = %s", packet->codec_type);
+if (packet) {
+	Debug(2, "PHASE 2 packet->codec_type = %s", packet->codec_type);
+} else {
+	Debug(2, "PHASE 2 NO packet !!!");
+}
 
   if (!packet) {
     // Throttle: don't queue too many packets in the decoder
@@ -3307,7 +3311,11 @@ Debug(2, "PHASE 2 packet->codec_type = %s", packet->codec_type);
   // ===========================================================================
   // PHASE 3: Convert decoded frame to Image
   // ===========================================================================
+if (packet) {
 Debug(2, "PHASE 3 frame transfer = %d", packet->image_index);
+} else {
+Debug(2, "PHASE 3 NO packet !!!");
+}
 
   if (packet->in_frame) {
     // Handle hardware-accelerated frames
