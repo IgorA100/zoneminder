@@ -3415,12 +3415,45 @@ bool Monitor::Decode() {
     // Write to shared image buffer.
     unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
     decoding_image_count++;
-    WriteShmFrame(index, capture_image);
-    shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
-    shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
-    shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    shared_data->last_write_index = index; 
 
+        bool can_passthrough = (
+            capture_image->PixFormat() == AV_PIX_FMT_YUV420P ||
+            capture_image->PixFormat() == AV_PIX_FMT_YUVJ420P || 
+            capture_image->PixFormat() == AV_PIX_FMT_RGB24 ||
+            capture_image->PixFormat() == AV_PIX_FMT_BGR24 ||
+            capture_image->PixFormat() == AV_PIX_FMT_RGBA ||
+            capture_image->PixFormat() == AV_PIX_FMT_BGRA ||
+            capture_image->PixFormat() == AV_PIX_FMT_GRAY8
+        );
+
+        if (!can_passthrough) {
+            Debug(1, "Green Screen Fix: Format %s not directly supported for SHM. Converting to YUV420P.", 
+                  av_get_pix_fmt_name((AVPixelFormat)capture_image->PixFormat()));
+            
+            // Создаем временный буфер гарантированно совместимого формата
+            Image temp_image(camera_width, camera_height, ZM_COLOUR_YUV420P, ZM_SUBPIX_ORDER_YUV420P);
+            
+            // Конвертируем через имеющийся контекст swscale (он уже создан в setupConvertContext)
+            if (convert_context) {
+                if (!temp_image.Assign(capture_image->Buffer(), convert_context)) {
+                    Error("Failed to convert frame format for monitor %d", id);
+                    // В случае ошибки конвертации лучше отправить пустой кадр, чем упасть
+                } else {
+                    // Заменяем указатель на сконвертированный кадр
+                    capture_image = &temp_image; 
+                }
+            }
+        }
+
+        // Теперь пишем в SHM данные ГАРАНТИРОВАННО правильного формата
+        WriteShmFrame(index, capture_image);
+        shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
+
+        // Обновляем метаданные ПОСЛЕ успешной записи байтов
+        shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
+        shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        shared_data->last_write_index = index; 
+ 
     // Warn if falling behind
     auto lag = std::chrono::system_clock::now() - packet->timestamp;
     if (lag > Seconds(ZM_WATCH_MAX_DELAY)) {
