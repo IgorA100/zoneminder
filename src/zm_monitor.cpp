@@ -3386,38 +3386,45 @@ bool Monitor::Decode() {
   // PHASE 5: Process the RGB image (deinterlace, rotate, privacy, timestamp)
   // ===========================================================================
 
-
         if (packet->image) {
             Image *capture_image = packet->image;
 
-            // ... деинтерлейсинг ...
-            
+            // Deinterlacing / Orientation 
+            if (deinterlacing_value) {
+                if (!applyDeinterlacing(packet, capture_image)) {
+                    packet->decoded = true;
+                    packet->notify_all();
+                    packetqueue.notify_all();
+                    return false;
+                }
+            }
             applyOrientation(capture_image);
-            if (privacy_bitmask) { capture_image->MaskPrivacy(privacy_bitmask); }
-            if (config.timestamp_on_capture) { TimestampImage(capture_image, packet->timestamp); }
+            
+            // Маска приватности (оставляем вашу строку без изменений)
+            if (privacy_bitmask) { 
+                capture_image->MaskPrivacy(privacy_bitmask); 
+            }
+            if (config.timestamp_on_capture) { 
+                TimestampImage(capture_image, packet->timestamp); 
+            }
 
             unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
             decoding_image_count++;
 
-            // Проверяем формат. Если он НЕ YUV420P/JPEG/YUV422P - значит пришел какой-то экзотический NVxx
-            bool is_problem_format = (
-                capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
-                capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P && 
-                capture_image->PixFormat() != AV_PIX_FMT_RGB24 &&
-                capture_image->PixFormat() != AV_PIX_FMT_BGR24
-            );
-
-            if (is_problem_format && packet->in_frame) {
-                 Debug(1, "Keyframe format mismatch detected.");
-                 // Просто принудительно говорим изображению, что оно теперь YUV420P
-                 // Это меняет ТОЛЬКО заголовок буфера, сами байты остаются теми же.
-                 capture_image->imagePixFormat = static_cast<AVPixelFormat>(AV_PIX_FMT_YUV420P);
-                 // Обновляем вспомогательные поля размера, чтобы swscale/zms не сошли с ума
-                 capture_image->linesize = av_image_get_linesize(AV_PIX_FMT_YUV420P, capture_image->width, 1);
+            // === МИНИМАЛЬНОЕ ИСПРАВЛЕНИЕ ДЛЯ GREEN SCREEN ===
+            // Убираем ВСЮ логику создания temp_img и sws_scale.
+            // Просто проверяем, не является ли формат "битым" (None), и если да - задаем дефолтный YUV420P через public setter.
+            
+            if (capture_image->PixFormat() == AV_PIX_FMT_NONE && packet->in_frame) {
+                Debug(1, "Fixing invalid PixFormat to YUV420P");
+                // Используем ПУБЛИЧНЫЙ метод-сеттер, который есть в вашем .h файле
+                capture_image->AVPixFormat(AV_PIX_FMT_YUV420P); 
             }
 
             WriteShmFrame(index, capture_image);
             shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
+
+            // Обновляем метаданные ПОСЛЕ записи байтов
             shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
             shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             shared_data->last_write_index = index;
@@ -3427,6 +3434,7 @@ bool Monitor::Decode() {
               Warning("Decoding is not keeping up. %.2f seconds behind capture.", FPSeconds(lag).count());
             }
         }
+
 
   // Capture paths that deliver a raw Image without an ffmpeg decode (e.g.
   // LocalCamera/V4L2) leave packet->in_frame null even though the pixels are
