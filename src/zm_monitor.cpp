@@ -3386,6 +3386,7 @@ bool Monitor::Decode() {
   // PHASE 5: Process the RGB image (deinterlace, rotate, privacy, timestamp)
   // ===========================================================================
 
+
         if (packet->image) {
             Image *capture_image = packet->image;
 
@@ -3399,8 +3400,6 @@ bool Monitor::Decode() {
                 }
             }
             applyOrientation(capture_image);
-            
-            // Маска приватности (оставляем вашу строку без изменений)
             if (privacy_bitmask) { 
                 capture_image->MaskPrivacy(privacy_bitmask); 
             }
@@ -3411,33 +3410,32 @@ bool Monitor::Decode() {
             unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
             decoding_image_count++;
 
-            // === ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА ПРИ DECODING_KEYFRAMES ===
-            // Проблема: Frame имеет один PixFormat, а Buffer у Image - другой.
-            // Решение: Пересоздаем буфер изображения под формат кадра.
+            // === ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ЗЕЛЕНОГО КВАДРАТА ПРИ DECODING_KEYFRAMES ===
 
+            // Проверяем, отличается ли входящий кадр от текущего буфера изображения
             bool buffer_needs_resize = (
                 (capture_image->Width() != static_cast<unsigned int>(packet->in_frame->width)) ||
                 (capture_image->Height() != static_cast<unsigned int>(packet->in_frame->height)) ||
-                (capture_image->PixFormat() != packet->in_frame->format)
+                (capture_image->PixFormat() != static_cast<AVPixelFormat>(packet->in_frame->format))
             );
 
-            if (buffer_needs_reize) {
+            if (buffer_needs_resize) {
                 Debug(1, "Monitor %d: Resizing image buffer to match frame format: %s (%dx%d)", 
-                      id, av_get_pix_fmt_name(packet->in_frame->format), 
+                      id, av_get_pix_fmt_name(static_cast<AVPixelFormat>(packet->in_frame->format)), 
                       packet->in_frame->width, packet->in_frame->height);
 
-                // Принудительно устанавливаем параметры изображения объекта
+                // Устанавливаем новые размеры и формат через публичные методы/сеттеры
                 capture_image->width = packet->in_frame->width;
                 capture_image->height = packet->in_frame->height;
                 
-                // Используем публичный метод-сеттер для формата (вместо прямого доступа к protected полю)
+                // Используем public setter для формата пикселей
                 capture_image->AVPixFormat(static_cast<AVPixelFormat>(packet->in_frame->format));
                 
-                // Вызываем Resize. Это освободит старый buffer и аллоцирует новый правильного размера.
-                capture_image->Resize();
+                // Пересоздаем внутренний буфер под новый размер/формат
+                capture_image->Resize(); 
             }
 
-            // Копируем данные напрямую. Теперь размеры совпадают, зеленого квадрата не будет.
+            // --- Конвертация цвета ---
             uint8_t *dst_planes[4] = {nullptr};
             int dst_strides[4] = {0};
             
@@ -3448,13 +3446,27 @@ bool Monitor::Decode() {
             const uint8_t *src_data[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
             const int src_linesize[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
 
-            sws_scale(sws_convert_context, src_data, packet->in_frame->linesize, 
-                      0, packet->in_frame->height, dst_data, dst_strides);
+            // Создаем временный swscale только на время этой операции
+            struct SwsContext *local_sws_ctx = sws_getContext(
+                packet->in_frame->width, packet->in_frame->height, 
+                static_cast<AVPixelFormat>(packet->in_frame->format),
+                capture_image->Width(), capture_image->Height(), 
+                capture_image->AVPixFormat(),
+                SWS_BILINEAR, NULL, NULL, NULL);
+
+            if (local_sws_ctx) {
+                sws_scale(local_sws_ctx, src_data, packet->in_frame->linesize, 
+                          0, packet->in_frame->height, dst_data, dst_strides);
+                sws_freeContext(local_sws_ctx);
+            } else {
+                Error("Unable to create local SWS Context for monitor %d", id);
+                // Даже если свскейл не создался, запишем что есть, чтобы избежать зависания индекса
+            }
 
             WriteShmFrame(index, capture_image);
             shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
 
-            // Обновляем метаданные ПОСЛЕ записи байтов
+            // Обновляем метаданные ПОСЛЕ успешной записи байтов
             shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
             shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             shared_data->last_write_index = index;
@@ -3464,7 +3476,6 @@ bool Monitor::Decode() {
               Warning("Decoding is not keeping up. %.2f seconds behind capture.", FPSeconds(lag).count());
             }
         }
-
 
   // Capture paths that deliver a raw Image without an ffmpeg decode (e.g.
   // LocalCamera/V4L2) leave packet->in_frame null even though the pixels are
