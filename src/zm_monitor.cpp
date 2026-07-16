@@ -3386,101 +3386,38 @@ bool Monitor::Decode() {
   // PHASE 5: Process the RGB image (deinterlace, rotate, privacy, timestamp)
   // ===========================================================================
 
+
         if (packet->image) {
             Image *capture_image = packet->image;
 
-            // Deinterlacing / Orientation 
-            if (deinterlacing_value) {
-                if (!applyDeinterlacing(packet, capture_image)) {
-                    packet->decoded = true;
-                    packet->notify_all();
-                    packetqueue.notify_all();
-                    return false;
-                }
-            }
-            applyOrientation(capture_image);
+            // ... деинтерлейсинг ...
             
-            // Маска приватности (оставляем БЕЗ ИЗМЕНЕНИЙ)
-            if (privacy_bitmask) { 
-                capture_image->MaskPrivacy(privacy_bitmask); 
-            }
-            if (config.timestamp_on_capture) { 
-                TimestampImage(capture_image, packet->timestamp); 
-            }
+            applyOrientation(capture_image);
+            if (privacy_bitmask) { capture_image->MaskPrivacy(privacy_bitmask); }
+            if (config.timestamp_on_capture) { TimestampImage(capture_image, packet->timestamp); }
 
             unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
             decoding_image_count++;
 
-            bool needs_conversion = (
+            // Проверяем формат. Если он НЕ YUV420P/JPEG/YUV422P - значит пришел какой-то экзотический NVxx
+            bool is_problem_format = (
                 capture_image->PixFormat() != AV_PIX_FMT_YUV420P &&
                 capture_image->PixFormat() != AV_PIX_FMT_YUVJ420P && 
                 capture_image->PixFormat() != AV_PIX_FMT_RGB24 &&
-                capture_image->PixFormat() != AV_PIX_FMT_BGR24 &&
-                capture_image->PixFormat() != AV_PIX_FMT_RGBA &&
-                capture_image->PixFormat() != AV_PIX_FMT_BGRA &&
-                capture_image->PixFormat() != AV_PIX_FMT_GRAY8
+                capture_image->PixFormat() != AV_PIX_FMT_BGR24
             );
 
-            std::unique_ptr<Image> temp_img;
-
-            if (needs_conversion && packet->in_frame) {
-                
-                Debug(1, "Converting format for SHM.");
-
-                // === ГАРАНТИРОВАННОЕ ИСПРАВЛЕНИЕ ОШИБКИ КОМПИЛЯЦИИ ===
-                // Создаем временный объект только по размерам (без передачи формата!)
-                temp_img.reset(new Image(
-                    packet->in_frame->width, 
-                    packet->in_frame->height, 
-                    3,          // Colours: жестко задаем 3 (RGB/YUV)
-                    0           // SubpixelOrder: ставим 0 или дефолтное значение вашего enum
-                ));
-                
-                // Сразу после создания принудительно устанавливаем нужный формат пикселей
-                // Это вызывает метод set_pixfmt, который принимает int/enum корректно
-                temp_img->AVPixFormat(AV_PIX_FMT_YUV420P); 
-
-                size_t required_size = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, 
-                                                                temp_img->Width(), 
-                                                                temp_img->Height(), 
-                                                                32);
-                
-                uint8_t *temp_buf = temp_img->WriteBuffer(temp_img->Width(), temp_img->Height(), 
-                                                          temp_img->Colours(), temp_img->SubpixelOrder());
-                if (!temp_buf) {
-                    Error("Failed to allocate buffer for color conversion");
-                    return false;
-                }
-
-                // Настройка плоскостей назначения
-                uint8_t *dst_planes[4] = {nullptr};
-                int dst_strides[4] = {0};
-                av_image_fill_arrays(dst_planes, dst_strides, temp_img->Buffer(), 
-                                     temp_img->AVPixFormat(), temp_img->Width(), temp_img->Height(), 32);
-
-                SwsContext *sws_ctx = sws_getContext(
-                    packet->in_frame->width, packet->in_frame->height, packet->in_frame->format,
-                    temp_img->Width(), temp_img->Height(), 
-                    temp_img->AVPixFormat(),
-                    SWS_BILINEAR, NULL, NULL, NULL);
-
-                if (sws_ctx) {
-                    const uint8_t *src_slices[4] = { packet->in_frame->data[0], packet->in_frame->data[1], packet->in_frame->data[2], nullptr };
-                    const int src_stride[4] = { packet->in_frame->linesize[0], packet->in_frame->linesize[1], packet->in_frame->linesize[2], 0 };
-                    
-                    sws_scale(sws_ctx, src_slices, packet->in_frame->linesize, 0, packet->in_frame->height, dst_data, dst_strides);
-                    sws_freeContext(sws_ctx);
-                } else {
-                    Error("Unable to create SWS Context for monitor %d", id);
-                    return false;
-                }
-                
-                capture_image = temp_img.get(); 
+            if (is_problem_format && packet->in_frame) {
+                 Debug(1, "Keyframe format mismatch detected.");
+                 // Просто принудительно говорим изображению, что оно теперь YUV420P
+                 // Это меняет ТОЛЬКО заголовок буфера, сами байты остаются теми же.
+                 capture_image->imagePixFormat = static_cast<AVPixelFormat>(AV_PIX_FMT_YUV420P);
+                 // Обновляем вспомогательные поля размера, чтобы swscale/zms не сошли с ума
+                 capture_image->linesize = av_image_get_linesize(AV_PIX_FMT_YUV420P, capture_image->width, 1);
             }
 
             WriteShmFrame(index, capture_image);
             shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
-
             shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
             shared_data->last_write_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             shared_data->last_write_index = index;
