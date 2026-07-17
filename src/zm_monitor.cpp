@@ -3204,7 +3204,7 @@ Debug(2, "PHASE 1 decoding = %d; needs_decoding = %d", decoding, needs_decoding)
   // ===========================================================================
   // Only if we didn't receive a frame above
 if (packet) {
-	Debug(2, "PHASE 2 packet->codec_type = %s", packet->codec_type);
+	Debug(2, "PHASE 2 packet->codec_type = %d", packet->codec_type);
 } else {
 	Debug(2, "PHASE 2 NO packet !!!");
 }
