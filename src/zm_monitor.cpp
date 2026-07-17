@@ -3182,11 +3182,39 @@ Debug(2, "PHASE 1 decoding = %d; needs_decoding = %d", decoding, needs_decoding)
       auto front_packet = front_lock.packet_;
 
       int ret = front_packet->receive_frame(context);
+Debug(1,
+    "RECV packet=%d ret=%d",
+    front_packet->image_index,
+    ret);
       if (ret > 0) {
         // Success - got a decoded frame, take ownership and process it
         packet_lock = std::move(decoder_queue.front());
         decoder_queue.pop_front();
         packet = front_packet;
+
+
+if (packet->in_frame)
+{
+    Debug(1,
+        "FRAME packet=%d "
+        "key=%d "
+        "format=%d "
+        "width=%d "
+        "height=%d "
+        "pict=%c",
+        packet->image_index,
+#if LIBAVUTIL_VERSION_MAJOR >= 57
+        !!(packet->in_frame->flags & AV_FRAME_FLAG_KEY),
+#else
+        packet->in_frame->key_frame,
+#endif
+        packet->in_frame->format,
+        packet->in_frame->width,
+        packet->in_frame->height,
+        av_get_picture_type_char(packet->in_frame->pict_type));
+}
+
+
         Debug(2, "Received frame for packet %d", packet->image_index);
         // Continue to PHASE 3 (frame processing)
       } else if (ret < 0) {
@@ -3244,6 +3272,22 @@ if (packet) {
       ((decoding == DECODING_KEYFRAMES) && packet->keyframe) ||
       ((decoding == DECODING_KEYFRAMESONDEMAND) && (hasViewers() || packet->keyframe))
     );
+Debug(1,
+    "DECODE packet=%d "
+    "key=%d "
+    "flags=0x%x "
+    "size=%d "
+    "should=%d "
+    "queue=%zu",
+    "pts=%lld",
+    packet->image_index,
+    packet->keyframe,
+    packet->packet ? packet->packet->flags : 0,
+    packet->packet ? packet->packet->size : 0,
+    should_decode,
+    decoder_queue.size(),
+    (long long)packet->packet->pts
+);
 
     if (!should_decode && !decoder_queue.empty()) {
       // Viewer stopped (or decoding no longer needed) while packets were
@@ -3264,9 +3308,24 @@ if (packet) {
 
     if (should_decode) {
       Debug(2, "Sending packet %d to decoder", packet->image_index);
-
+Debug(1,
+    "SEND packet=%d "
+    "key=%d "
+    "flags=0x%x "
+    "pts=%lld "
+    "dts=%lld",
+    packet->image_index,
+    packet->keyframe,
+    packet->packet->flags,
+    (long long)packet->packet->pts,
+    (long long)packet->packet->dts
+);
       SystemTimePoint starttime = std::chrono::system_clock::now();
       int ret = packet->send_packet(context);
+Debug(1,
+    "SEND RESULT packet=%d ret=%d",
+    packet->image_index,
+    ret);
       SystemTimePoint endtime = std::chrono::system_clock::now();
 
       // Warn if send_packet is taking too long
@@ -3371,6 +3430,13 @@ Debug(2, "PHASE 3 NO packet_image");
       bool have_converter = convert_context || setupConvertContext(packet->in_frame.get(), packet->image);
       if (have_converter) {
         if (!packet->image->Assign(packet->in_frame.get(), convert_context)) {
+
+Debug(1,
+    "ASSIGN packet=%d image=%p",
+    packet->image_index,
+    packet->image);
+
+
           delete packet->image;
           packet->image = nullptr;
         }
@@ -3436,6 +3502,15 @@ Debug(2, "PHASE 5 deinterlacing_value YES RETURN");
     // Write to shared image buffer.
     unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
     decoding_image_count++;
+
+
+Debug(1,
+    "SHM WRITE packet=%d "
+    "index=%d",
+    packet->image_index,
+    packet->image_index % image_buffer_count);
+
+
     WriteShmFrame(index, capture_image);
 Debug(2, "PHASE 5 index = %d, shared_data_last_write_index = %d, image_buffer_count = %d", index, shared_data->last_write_index, image_buffer_count);
 
