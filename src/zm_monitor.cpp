@@ -3273,20 +3273,17 @@ if (packet) {
       ((decoding == DECODING_KEYFRAMESONDEMAND) && (hasViewers() || packet->keyframe))
     );
 Debug(1,
-    "DECODE packet=%d "
-    "key=%d "
-    "flags=0x%x "
-    "size=%d "
-    "should=%d "
-    "queue=%zu",
-    "pts=%lld",
+    "DECODE idx=%d mode=%d already=%d key=%d flags=0x%x size=%d should=%d queue=%zu pts=%lld dts=%lld",
     packet->image_index,
+    decoding,
+    already_decoded,
     packet->keyframe,
     packet->packet ? packet->packet->flags : 0,
     packet->packet ? packet->packet->size : 0,
     should_decode,
     decoder_queue.size(),
-    (long long)packet->packet->pts
+    (long long)(packet->packet ? packet->packet->pts : AV_NOPTS_VALUE),
+    (long long)(packet->packet ? packet->packet->dts : AV_NOPTS_VALUE)
 );
 
     if (!should_decode && !decoder_queue.empty()) {
