@@ -3151,7 +3151,6 @@ bool Monitor::Decode() {
   // We do receive BEFORE send (reverse of normal libavcodec workflow) because
   // we need to maintain packet locks on packets while they're in the decoder.
   // Packets in decoder_queue have been sent but not yet received.
-Debug(2, "PHASE 1 decoder_queue.size = %zu", decoder_queue.size());
 
   if (!decoder_queue.empty()) {
     // If decoding is on-demand and no longer needed, flush rather than
@@ -3161,7 +3160,6 @@ Debug(2, "PHASE 1 decoder_queue.size = %zu", decoder_queue.size());
       (decoding == DECODING_KEYFRAMES) ||
       ((decoding == DECODING_ONDEMAND) && (hasViewers() || shared_data->last_write_index == image_buffer_count)) ||
       ((decoding == DECODING_KEYFRAMESONDEMAND) && hasViewers());
-Debug(2, "PHASE 1 decoding = %d, needs_decoding = %d", decoding, needs_decoding);
 
     if (!needs_decoding) {
       Debug(1, "Flushing decoder in phase 1: %zu packets queued but decoding no longer needed",
@@ -3203,11 +3201,6 @@ Debug(2, "PHASE 1 decoding = %d, needs_decoding = %d", decoding, needs_decoding)
   // PHASE 2: Get a new packet and send it to decoder (if needed)
   // ===========================================================================
   // Only if we didn't receive a frame above
-if (packet) {
-	Debug(2, "PHASE 2 packet->codec_type = %d", packet->codec_type);
-} else {
-	Debug(2, "PHASE 2 NO packet !!!");
-}
 
   if (!packet) {
     // Throttle: don't queue too many packets in the decoder
@@ -3312,11 +3305,6 @@ if (packet) {
   // ===========================================================================
   // PHASE 3: Convert decoded frame to Image
   // ===========================================================================
-if (packet) {
-Debug(2, "PHASE 3 packet_image_index = %d, packet->in_frame = %d", packet->image_index, packet->in_frame);
-} else {
-Debug(2, "PHASE 3 NO packet !!!");
-}
 
   if (packet->in_frame) {
     // Handle hardware-accelerated frames
@@ -3397,7 +3385,6 @@ Debug(2, "PHASE 3 NO packet !!!");
   // ===========================================================================
   // PHASE 5: Process the RGB image (deinterlace, rotate, privacy, timestamp)
   // ===========================================================================
-Debug(2, "PHASE 5");
 
   if (packet->image) {
     Image *capture_image = packet->image;
@@ -3429,8 +3416,6 @@ Debug(2, "PHASE 5");
     unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
     decoding_image_count++;
     WriteShmFrame(index, capture_image);
-Debug(2, "PHASE 5 index = %d, shared_data->last_write_index = %d, image_buffer_count = %d", index, shared_data->last_write_index, image_buffer_count);
-
     shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
     shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
     shared_data->last_write_index = index;
