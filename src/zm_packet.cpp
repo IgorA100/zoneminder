@@ -21,6 +21,8 @@
 #include "zm_ffmpeg.h"
 #include "zm_image.h"
 #include "zm_logger.h"
+#include <sstream>
+#include <iomanip>
 
 extern "C" {
 #include <libavutil/pixdesc.h>
@@ -28,6 +30,171 @@ extern "C" {
 
 using namespace std;
 AVPixelFormat target_format = AV_PIX_FMT_NONE;
+
+static const char *H264NalName(int type)
+{
+    switch(type)
+    {
+        case 1: return "SLICE";
+        case 5: return "IDR";
+        case 6: return "SEI";
+        case 7: return "SPS";
+        case 8: return "PPS";
+        case 9: return "AUD";
+        default: return "OTHER";
+    }
+}
+
+static const char *HEVCNalName(int type)
+{
+    switch(type)
+    {
+        case 19: return "IDR_W_RADL";
+        case 20: return "IDR_N_LP";
+        case 21: return "CRA";
+        case 32: return "VPS";
+        case 33: return "SPS";
+        case 34: return "PPS";
+        case 39: return "PREFIX_SEI";
+        case 40: return "SUFFIX_SEI";
+        default: return "OTHER";
+    }
+}
+
+static void DumpPacketNALs(const AVPacket *pkt, AVCodecID codec)
+{
+    if (!pkt || !pkt->data || pkt->size < 5)
+        return;
+
+    std::ostringstream out;
+
+    out << "NAL ";
+
+    //--------------------------------------------------
+    // Annex-B ?
+    //--------------------------------------------------
+
+    bool annexb = false;
+
+    for (int i=0;i<pkt->size-4;i++)
+    {
+        if ((pkt->data[i]==0) &&
+            (pkt->data[i+1]==0) &&
+            (
+              pkt->data[i+2]==1 ||
+              (
+                pkt->data[i+2]==0 &&
+                pkt->data[i+3]==1
+              )
+            ))
+        {
+            annexb=true;
+            break;
+        }
+    }
+
+    out << (annexb ? "AnnexB " : "AVCC/HVCC ");
+
+    //--------------------------------------------------
+
+    if (annexb)
+    {
+        const uint8_t *p=pkt->data;
+        const uint8_t *end=pkt->data+pkt->size;
+
+        while(p+4<end)
+        {
+            if(p[0]==0 && p[1]==0 &&
+               (
+                   p[2]==1 ||
+                   (
+                       p[2]==0 &&
+                       p[3]==1
+                   )
+               ))
+            {
+                int off=(p[2]==1)?3:4;
+
+                if(p+off>=end)
+                    break;
+
+                if(codec==AV_CODEC_ID_H264)
+                {
+                    int t=p[off]&0x1f;
+
+                    out
+                        << H264NalName(t)
+                        << "("
+                        << t
+                        << ") ";
+                }
+                else if(codec==AV_CODEC_ID_HEVC)
+                {
+                    int t=(p[off]>>1)&0x3f;
+
+                    out
+                        << HEVCNalName(t)
+                        << "("
+                        << t
+                        << ") ";
+                }
+            }
+
+            ++p;
+        }
+    }
+    else
+    {
+        //--------------------------------------------------
+        // AVCC / HVCC
+        //--------------------------------------------------
+
+        const uint8_t *p=pkt->data;
+        const uint8_t *end=pkt->data+pkt->size;
+
+        while(p+4<=end)
+        {
+            uint32_t len=
+                (p[0]<<24)|
+                (p[1]<<16)|
+                (p[2]<<8)|
+                p[3];
+
+            p+=4;
+
+            if(len==0)
+                break;
+
+            if(p+len>end)
+                break;
+
+            if(codec==AV_CODEC_ID_H264)
+            {
+                int t=p[0]&0x1f;
+
+                out
+                    << H264NalName(t)
+                    << "("
+                    << t
+                    << ") ";
+            }
+            else if(codec==AV_CODEC_ID_HEVC)
+            {
+                int t=(p[0]>>1)&0x3f;
+
+                out
+                    << HEVCNalName(t)
+                    << "("
+                    << t
+                    << ") ";
+            }
+
+            p+=len;
+        }
+    }
+
+    Debug(1,"%s",out.str().c_str());
+}
 
 ZMPacket::ZMPacket() :
   locked(false),
@@ -105,6 +272,14 @@ ssize_t ZMPacket::ram() {
 
 int ZMPacket::send_packet(AVCodecContext *ctx) {
   // ret == 0 means EAGAIN
+DumpPacketNALs(packet.get(), ctx->codec_id);
+Debug(1,
+    "SEND idx=%d zm_key=%d av_key=%d codec=%s",
+    image_index,
+    keyframe,
+    !!(packet->flags & AV_PKT_FLAG_KEY),
+    avcodec_get_name(ctx->codec_id)
+);
   int ret = avcodec_send_packet(ctx, packet.get());
   if (ret < 0) {
     if (ret == AVERROR(EAGAIN)) {
