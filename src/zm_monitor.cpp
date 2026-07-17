@@ -3161,6 +3161,7 @@ Debug(2, "PHASE 1 decoder_queue.size = %zu", decoder_queue.size());
       (decoding == DECODING_KEYFRAMES) ||
       ((decoding == DECODING_ONDEMAND) && (hasViewers() || shared_data->last_write_index == image_buffer_count)) ||
       ((decoding == DECODING_KEYFRAMESONDEMAND) && hasViewers());
+Debug(2, "PHASE 1 decoding = %s; needs_decoding = %d", decoding, needs_decoding);
 
     if (!needs_decoding) {
       Debug(1, "Flushing decoder in phase 1: %zu packets queued but decoding no longer needed",
@@ -3312,7 +3313,7 @@ if (packet) {
   // PHASE 3: Convert decoded frame to Image
   // ===========================================================================
 if (packet) {
-Debug(2, "PHASE 3 frame transfer = %d", packet->image_index);
+Debug(2, "PHASE 3 packet_image_index = %d; packet->in_frame = %d", packet->image_index, packet->in_frame);
 } else {
 Debug(2, "PHASE 3 NO packet !!!");
 }
