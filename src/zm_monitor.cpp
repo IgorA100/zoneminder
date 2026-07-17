@@ -3161,7 +3161,7 @@ Debug(2, "PHASE 1 decoder_queue.size = %zu", decoder_queue.size());
       (decoding == DECODING_KEYFRAMES) ||
       ((decoding == DECODING_ONDEMAND) && (hasViewers() || shared_data->last_write_index == image_buffer_count)) ||
       ((decoding == DECODING_KEYFRAMESONDEMAND) && hasViewers());
-Debug(2, "PHASE 1 decoding = %s; needs_decoding = %d", decoding, needs_decoding);
+Debug(2, "PHASE 1 decoding = %d; needs_decoding = %d", decoding, needs_decoding);
 
     if (!needs_decoding) {
       Debug(1, "Flushing decoder in phase 1: %zu packets queued but decoding no longer needed",
