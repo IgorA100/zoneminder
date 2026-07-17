@@ -3151,6 +3151,7 @@ bool Monitor::Decode() {
   // We do receive BEFORE send (reverse of normal libavcodec workflow) because
   // we need to maintain packet locks on packets while they're in the decoder.
   // Packets in decoder_queue have been sent but not yet received.
+Debug(2, "PHASE 1 decoder_queue.size = %zu", decoder_queue.size());
 
   if (!decoder_queue.empty()) {
     // If decoding is on-demand and no longer needed, flush rather than
@@ -3160,6 +3161,7 @@ bool Monitor::Decode() {
       (decoding == DECODING_KEYFRAMES) ||
       ((decoding == DECODING_ONDEMAND) && (hasViewers() || shared_data->last_write_index == image_buffer_count)) ||
       ((decoding == DECODING_KEYFRAMESONDEMAND) && hasViewers());
+Debug(2, "PHASE 1 decoding = %d; needs_decoding = %d", decoding, needs_decoding);
 
     if (!needs_decoding) {
       Debug(1, "Flushing decoder in phase 1: %zu packets queued but decoding no longer needed",
@@ -3201,6 +3203,11 @@ bool Monitor::Decode() {
   // PHASE 2: Get a new packet and send it to decoder (if needed)
   // ===========================================================================
   // Only if we didn't receive a frame above
+if (packet) {
+	Debug(2, "PHASE 2 packet_codec_type = %d", packet->codec_type);
+} else {
+	Debug(2, "PHASE 2 NO packet !!!");
+}
 
   if (!packet) {
     // Throttle: don't queue too many packets in the decoder
@@ -3305,10 +3312,17 @@ bool Monitor::Decode() {
   // ===========================================================================
   // PHASE 3: Convert decoded frame to Image
   // ===========================================================================
+if (packet) {
+Debug(2, "PHASE 3 packet_image_index = %d", packet->image_index);
+} else {
+Debug(2, "PHASE 3 NO packet !!!");
+}
 
   if (packet->in_frame) {
+Debug(2, "PHASE 3 packet_in_frame_YES !!!");
     // Handle hardware-accelerated frames
     int hw_ret = packet->transfer_hwframe(context);
+Debug(2, "PHASE 3 hw_ret = %d", hw_ret);
     if (hw_ret < 0) {
       // Hardware transfer failed - frame is unusable
       Debug(1, "Hardware frame transfer failed for packet %d", packet->image_index);
@@ -3319,6 +3333,7 @@ bool Monitor::Decode() {
     }
 
     if (!packet->image) {
+Debug(2, "PHASE 3 NO packet_image");
       // Pick the most pipeline-friendly format Image can represent. If the
       // decoder's native format is one Image supports, capture into that
       // directly so sws_scale becomes a no-op identity copy via av_image_copy
@@ -3368,8 +3383,10 @@ bool Monitor::Decode() {
     // ===========================================================================
     // PHASE 4: Prepare Y-channel image for analysis (if needed)
     // ===========================================================================
+Debug(2, "PHASE 4");
 
     if ((shared_data->analysing != ANALYSING_NONE) && (analysis_image == ANALYSISIMAGE_YCHANNEL)) {
+Debug(2, "PHASE 4 ANALYSING");
       Image *y_image = packet->get_y_image();
       if (y_image) {
         if (packet->in_frame->width != camera_width || packet->in_frame->height != camera_height) {
@@ -3385,13 +3402,17 @@ bool Monitor::Decode() {
   // ===========================================================================
   // PHASE 5: Process the RGB image (deinterlace, rotate, privacy, timestamp)
   // ===========================================================================
+Debug(2, "PHASE 5");
 
   if (packet->image) {
+Debug(2, "PHASE 5 packet_image YES");
     Image *capture_image = packet->image;
 
     // Deinterlacing
     if (deinterlacing_value) {
+Debug(2, "PHASE 5 deinterlacing_value YES");
       if (!applyDeinterlacing(packet, capture_image)) {
+Debug(2, "PHASE 5 deinterlacing_value YES RETURN");
         packet->decoded = true;
         packet->notify_all();
         packetqueue.notify_all();  // Wake up analysis thread
@@ -3416,6 +3437,8 @@ bool Monitor::Decode() {
     unsigned int index = (shared_data->last_write_index + 1) % image_buffer_count;
     decoding_image_count++;
     WriteShmFrame(index, capture_image);
+Debug(2, "PHASE 5 index = %d, shared_data_last_write_index = %d, image_buffer_count = %d", index, shared_data->last_write_index, image_buffer_count);
+
     shared_timestamps[index] = zm::chrono::duration_cast<timeval>(packet->timestamp.time_since_epoch());
     shared_data->signal = signal_check_points ? CheckSignal(capture_image) : true;
     shared_data->last_write_index = index;
