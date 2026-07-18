@@ -3160,7 +3160,8 @@ Debug(2, "PHASE 1 decoder_queue.size = %zu", decoder_queue.size());
       (decoding == DECODING_ALWAYS) ||
       (decoding == DECODING_KEYFRAMES) ||
       ((decoding == DECODING_ONDEMAND) && (hasViewers() || shared_data->last_write_index == image_buffer_count)) ||
-      ((decoding == DECODING_KEYFRAMESONDEMAND) && hasViewers());
+/*      ((decoding == DECODING_KEYFRAMESONDEMAND) && hasViewers());*/
+      (decoding == DECODING_KEYFRAMESONDEMAND);
 Debug(2, "PHASE 1 decoding = %d; needs_decoding = %d", decoding, needs_decoding);
 
     if (!needs_decoding) {
@@ -3198,7 +3199,7 @@ Debug(1,
         packet = front_packet;
 
 
-if ((decoding == DECODING_KEYFRAMES || decoding == DECODING_KEYFRAMESONDEMAND) && decoder_warming_up)
+if ((decoding == DECODING_KEYFRAMES || (decoding == DECODING_KEYFRAMESONDEMAND && !hasViewers()) && decoder_warming_up)
 {
     decoder_warming_up = false;
 
@@ -3282,7 +3283,7 @@ if (packet) {
     }
 
     // Check if this packet needs to be sent to the decoder
-if ((decoding == DECODING_KEYFRAMES) &&
+if ((decoding == DECODING_KEYFRAMES || (decoding == DECODING_KEYFRAMESONDEMAND && !hasViewers())) &&
     packet->keyframe)
 {
     decoder_warming_up = true;
