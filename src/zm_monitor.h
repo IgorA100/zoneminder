@@ -61,6 +61,12 @@ class Monitor : public std::enable_shared_from_this<Monitor> {
   friend class MonitorLinkExpression;
   friend class ONVIF;
 
+private:
+    // DECODING_KEYFRAMES:
+    // After an IDR frame FFmpeg needs following P/B frames
+    // before it can output AVFrame.
+    bool decoder_warming_up = false;
+
  public:
   typedef enum {
     QUERY=0,
