@@ -281,6 +281,17 @@ Debug(1,
     avcodec_get_name(ctx->codec_id)
 );
   int ret = avcodec_send_packet(ctx, packet.get());
+
+Debug(1,
+      "AVCODEC SEND packet=%d ret=%d pts=%lld dts=%lld duration=%lld size=%d flags=0x%x",
+      image_index,
+      ret,
+      (long long)packet->pts,
+      (long long)packet->dts,
+      (long long)packet->duration,
+      packet->size,
+      packet->flags);
+    
   if (ret < 0) {
     if (ret == AVERROR(EAGAIN)) {
       Debug(1, "Unable to send packet %d %s, packet %d", ret, av_make_error_string(ret).c_str(), image_index);
@@ -303,6 +314,16 @@ int ZMPacket::receive_frame(AVCodecContext *ctx) {
     return -1;
   }
   int ret = avcodec_receive_frame(ctx, receive_frame.get());
+
+
+Debug(1,
+      "AVCODEC RECEIVE packet=%d ret=%d pts=%lld dts=%lld best_effort=%lld",
+      image_index,
+      ret,
+      (long long)receive_frame->pts,
+      (long long)receive_frame->pkt_dts,
+      (long long)receive_frame->best_effort_timestamp);
+    
   if (ret < 0) {
     if (ret == AVERROR(EAGAIN)) {
       Debug(1, "Ret from receive_frame ret: %d %s, packet %d", ret, av_make_error_string(ret).c_str(), image_index);
