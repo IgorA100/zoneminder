@@ -3198,8 +3198,7 @@ Debug(1,
         packet = front_packet;
 
 
-if (decoding == DECODING_KEYFRAMES &&
-    decoder_warming_up)
+if ((decoding == DECODING_KEYFRAMES || decoding == DECODING_KEYFRAMESONDEMAND) && decoder_warming_up)
 {
     decoder_warming_up = false;
 
@@ -3304,7 +3303,8 @@ if ((decoding == DECODING_KEYFRAMES) &&
  (packet->keyframe || decoder_warming_up)) ||
 	  
 	  
-      ((decoding == DECODING_KEYFRAMESONDEMAND) && (hasViewers() || packet->keyframe))
+/*      ((decoding == DECODING_KEYFRAMESONDEMAND) && (hasViewers() || packet->keyframe))*/
+      ((decoding == DECODING_KEYFRAMESONDEMAND) && (hasViewers() || packet->keyframe || decoder_warming_up))
     );
 Debug(1,
     "DECODE idx=%d mode=%d already=%d key=%d flags=0x%x size=%d should=%d queue=%zu pts=%lld dts=%lld",
