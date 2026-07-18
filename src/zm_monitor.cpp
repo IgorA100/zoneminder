@@ -3198,6 +3198,19 @@ Debug(1,
         packet = front_packet;
 
 
+if (decoding == DECODING_KEYFRAMES &&
+    decoder_warming_up)
+{
+    decoder_warming_up = false;
+
+    Debug(1,
+        "Decoder warmup finished packet=%d",
+        packet->image_index);
+}
+		  
+
+
+		  
 if (packet->in_frame)
 {
     Debug(1,
@@ -3270,13 +3283,26 @@ if (packet) {
     }
 
     // Check if this packet needs to be sent to the decoder
+if ((decoding == DECODING_KEYFRAMES) &&
+    packet->keyframe)
+{
+    decoder_warming_up = true;
+
+    Debug(1,
+        "Decoder warmup started packet=%d",
+        packet->image_index);
+}
     bool already_decoded = packet->image || packet->in_frame || !packet->packet->size;
     bool should_decode = !already_decoded && (
       (decoding == DECODING_ALWAYS) ||
       ((decoding == DECODING_ONDEMAND) && (hasViewers() || shared_data->last_write_index == image_buffer_count)) ||
 /*      ((decoding == DECODING_KEYFRAMES) && packet->keyframe) ||*/
-      ((decoding == DECODING_KEYFRAMES) &&
-       (packet->keyframe || decoder_queue.size() > 0)) ||
+/*      ((decoding == DECODING_KEYFRAMES) &&
+       (packet->keyframe || decoder_queue.size() > 0)) ||*/
+
+((decoding == DECODING_KEYFRAMES) &&
+ (packet->keyframe || decoder_warming_up)) ||
+	  
 	  
       ((decoding == DECODING_KEYFRAMESONDEMAND) && (hasViewers() || packet->keyframe))
     );
