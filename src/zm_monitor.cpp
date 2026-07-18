@@ -3199,7 +3199,7 @@ Debug(1,
         packet = front_packet;
 
 
-if ((decoding == DECODING_KEYFRAMES || (decoding == DECODING_KEYFRAMESONDEMAND && !hasViewers()) && decoder_warming_up)
+if ((decoding == DECODING_KEYFRAMES || (decoding == DECODING_KEYFRAMESONDEMAND && !hasViewers())) && decoder_warming_up)
 {
     decoder_warming_up = false;
 
