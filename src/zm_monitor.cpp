@@ -3190,6 +3190,11 @@ Debug(1,
         // Success - got a decoded frame, take ownership and process it
         packet_lock = std::move(decoder_queue.front());
         decoder_queue.pop_front();
+
+Debug(1,
+    "QUEUE POP size=%zu",
+    decoder_queue.size());
+
         packet = front_packet;
 
 
@@ -3348,6 +3353,11 @@ Debug(1,
 
       // Success - packet sent to decoder, queue it for receive later
       decoder_queue.push_back(std::move(packet_lock));
+
+Debug(1,
+    "QUEUE PUSH size=%zu",
+    decoder_queue.size());		
+		
       packetqueue.increment_it(decoder_it, false);
       return true;  // Frame will be received on a future call
     }
