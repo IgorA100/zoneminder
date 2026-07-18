@@ -3274,7 +3274,10 @@ if (packet) {
     bool should_decode = !already_decoded && (
       (decoding == DECODING_ALWAYS) ||
       ((decoding == DECODING_ONDEMAND) && (hasViewers() || shared_data->last_write_index == image_buffer_count)) ||
-      ((decoding == DECODING_KEYFRAMES) && packet->keyframe) ||
+/*      ((decoding == DECODING_KEYFRAMES) && packet->keyframe) ||*/
+      ((decoding == DECODING_KEYFRAMES) &&
+       (packet->keyframe || decoder_queue.size() > 0)) ||
+	  
       ((decoding == DECODING_KEYFRAMESONDEMAND) && (hasViewers() || packet->keyframe))
     );
 Debug(1,
