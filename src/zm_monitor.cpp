@@ -3289,13 +3289,15 @@ bool Monitor::Decode() {
       SystemTimePoint starttime = std::chrono::system_clock::now();
       int ret = packet->send_packet(context);
       SystemTimePoint endtime = std::chrono::system_clock::now();
-      if (ret >= 0 && packet->keyframe && (decoding == DECODING_KEYFRAMES || (decoding == DECODING_KEYFRAMESONDEMAND && !hasViewers()))) {
-        decoder_requires_next_packet = true;
-        Debug(2, "Decoder requires follow-up packets after keyframe %d, decoder queue push size=%zu", packet->image_index, decoder_queue.size());
-      }
 
       // Warn if send_packet is taking too long
       int fps = static_cast<int>(get_capture_fps());
+      if (ret >= 0 && packet->keyframe && (decoding == DECODING_KEYFRAMES || (decoding == DECODING_KEYFRAMESONDEMAND && !hasViewers()))) {
+        decoder_requires_next_packet = true;
+//        Debug(2, "Decoder requires follow-up packets after keyframe %d (EAGAIN=%s). Capture fps=%d, decoder queue push size=%zu", packet->image_index, (ret == 0) ? "true" : "false", fps, decoder_queue.size());
+        Debug(2, "Decoder requires follow-up packets after keyframe %d (EAGAIN=%s). Capture fps=%d, decoder queue push size=%zu, duration=%.3f", packet->image_index, (ret == 0) ? "true" : "false", fps, decoder_queue.size(), FPSeconds(endtime - starttime).count());
+      }
+
       Milliseconds warning_threshold;
       if (waiting_for_followup) {
         // Decoder may legitimately require additional packets
