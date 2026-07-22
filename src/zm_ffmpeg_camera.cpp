@@ -658,6 +658,25 @@ int FfmpegCamera::OpenFfmpeg() {
         Debug(1, "Setting codec thread_count to %d", mVideoCodecContext->thread_count);
         av_dict_set(&opts, "thread_count", nullptr, AV_DICT_MATCH_CASE);
       }
+// thread_type
+entry = av_dict_get(opts, "thread_type", nullptr, AV_DICT_MATCH_CASE);
+
+if (entry) {
+    if (!strcmp(entry->value, "frame"))
+        mVideoCodecContext->thread_type = FF_THREAD_FRAME;
+    else if (!strcmp(entry->value, "slice"))
+        mVideoCodecContext->thread_type = FF_THREAD_SLICE;
+    else if (!strcmp(entry->value, "frame+slice"))
+        mVideoCodecContext->thread_type =
+            FF_THREAD_FRAME | FF_THREAD_SLICE;
+    else
+        Warning("Unknown thread_type '%s'", entry->value);
+
+    Debug(1, "Setting codec thread_type to %d",
+          mVideoCodecContext->thread_type);
+
+    av_dict_set(&opts, "thread_type", nullptr, AV_DICT_MATCH_CASE);
+}
       // reorder_queparse for avforpts, mOpcodec
       av_dict_set(&opts, "reorder_queue_size", nullptr, AV_DICT_MATCH_CASE);
       av_dict_set(&opts, "probesize", nullptr, AV_DICT_MATCH_CASE);
@@ -761,6 +780,13 @@ int FfmpegCamera::OpenFfmpeg() {
     }  // end if hwaccel_name
 
     ret = avcodec_open2(mVideoCodecContext, mVideoCodec, &opts);
+Debug(1,
+    "thread_count=%d thread_type=%d active_thread_type=%d delay=%d has_b_frames=%d",
+    mVideoCodecContext->thread_count,
+    mVideoCodecContext->thread_type,
+    mVideoCodecContext->active_thread_type,
+    mVideoCodecContext->delay,
+    mVideoCodecContext->has_b_frames);
 
     e = nullptr;
     while ((e = av_dict_get(opts, "", e, AV_DICT_IGNORE_SUFFIX)) != nullptr) {
