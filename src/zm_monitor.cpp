@@ -3199,9 +3199,6 @@ bool Monitor::Decode() {
         packet_lock = std::move(decoder_queue.front());
         decoder_queue.pop_front();
         packet = front_packet;
-        if (decoder_requires_next_packet ) {
-          decoder_requires_next_packet = false;
-        }
         Debug(2, "Received frame for packet %d, decoder queue pop size=%zu", packet->image_index, decoder_queue.size());
         // Continue to PHASE 3 (frame processing)
       } else if (ret < 0) {
@@ -3373,6 +3370,9 @@ bool Monitor::Decode() {
       packet->decoded = true;
       packet->notify_all();
       packetqueue.notify_all();
+      if (decoder_requires_next_packet ) {
+        decoder_requires_next_packet = false;
+      }
       return false;
     }
 
@@ -3446,6 +3446,9 @@ bool Monitor::Decode() {
 
   if (packet->image) {
     Image *capture_image = packet->image;
+    if (decoder_requires_next_packet ) {
+      decoder_requires_next_packet = false;
+    }
 
     // Deinterlacing
     if (deinterlacing_value) {
