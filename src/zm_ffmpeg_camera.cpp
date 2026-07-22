@@ -787,6 +787,19 @@ Debug(1,
     mVideoCodecContext->active_thread_type,
     mVideoCodecContext->delay,
     mVideoCodecContext->has_b_frames);
+Debug(1,
+      "codec=%s caps=0x%x",
+      mVideoCodec->name,
+      mVideoCodec->capabilities);
+Debug(1,
+      "codec id=%d",
+      mVideoCodec->id);
+Debug(1, "Codec name = %s", mVideoCodec->name);
+Debug(1,
+      "gop=%d max_b_frames=%d has_b_frames=%d",
+      mVideoCodecContext->gop_size,
+      mVideoCodecContext->max_b_frames,
+      mVideoCodecContext->has_b_frames);
 
     e = nullptr;
     while ((e = av_dict_get(opts, "", e, AV_DICT_IGNORE_SUFFIX)) != nullptr) {
