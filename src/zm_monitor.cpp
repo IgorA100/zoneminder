@@ -3157,7 +3157,6 @@ bool Monitor::Decode() {
   AVCodecContext *context = camera->getVideoCodecContext();
   ZMPacketLock packet_lock;
   std::shared_ptr<ZMPacket> packet;
-  const bool waiting_for_followup = decoder_requires_next_packet;
 
   // ===========================================================================
   // PHASE 1: Try to receive a decoded frame from the decoder
@@ -3297,7 +3296,7 @@ bool Monitor::Decode() {
       }
 
       Milliseconds warning_threshold;
-      if (waiting_for_followup) {
+      if (decoder_requires_next_packet) {
         // Decoder may legitimately require additional packets
         // before producing the first decoded frame.
         warning_threshold = Milliseconds(500);
@@ -3313,7 +3312,7 @@ bool Monitor::Decode() {
             "Capture fps=%d, queue size=%zu, keyframe interval=%d, ret=%d",
             packet->image_index,
             FPSeconds(endtime - starttime).count(),
-            waiting_for_followup
+            decoder_requires_next_packet
                 ? " (keyframe startup / decoder latency)"
                 : "",
             fps,
