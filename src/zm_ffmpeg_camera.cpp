@@ -781,8 +781,9 @@ if (entry) {
 
     ret = avcodec_open2(mVideoCodecContext, mVideoCodec, &opts);
 Debug(1,
-    "thread_count=%d thread_type=%d active_thread_type=%d delay=%d has_b_frames=%d",
+    "thread_count=%d active_thread_count=%d thread_type=%d active_thread_type=%d delay=%d has_b_frames=%d",
     mVideoCodecContext->thread_count,
+    mVideoCodecContext->active_thread_count,
     mVideoCodecContext->thread_type,
     mVideoCodecContext->active_thread_type,
     mVideoCodecContext->delay,
