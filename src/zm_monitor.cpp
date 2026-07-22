@@ -3299,7 +3299,7 @@ bool Monitor::Decode() {
       if (decoder_requires_next_packet) {
         // Decoder may legitimately require additional packets
         // before producing the first decoded frame.
-        warning_threshold = Milliseconds(500);
+        warning_threshold = Milliseconds(200);
       } else if (fps > 0) {
         warning_threshold = Milliseconds(1000 / fps);
       } else {
