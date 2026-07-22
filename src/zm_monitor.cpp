@@ -3277,17 +3277,16 @@ bool Monitor::Decode() {
     if (should_decode) {
       Debug(2,
         "Sending packet=%d to decoder "
-        "key=%d "
-        "flags=0x%x "
-        "pts=%lld "
-        "dts=%lld. ",
-        " Capture fps=%d, decoder queue size=%zu"
+        "key=%d, "
+        "flags=0x%x, "
+        "pts=%lld, "
+        "dts=%lld, "
+        "decoder queue size=%zu",
         packet->image_index,
         packet->keyframe,
         packet->packet->flags,
         (long long)packet->packet->pts,
         (long long)packet->packet->dts,
-        fps,
         decoder_queue.size()
       );
       SystemTimePoint starttime = std::chrono::system_clock::now();
