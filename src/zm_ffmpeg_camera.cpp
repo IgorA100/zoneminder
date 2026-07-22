@@ -781,26 +781,17 @@ if (entry) {
 
     ret = avcodec_open2(mVideoCodecContext, mVideoCodec, &opts);
 Debug(1,
-    "thread_count=%d active_thread_count=%d thread_type=%d active_thread_type=%d delay=%d has_b_frames=%d",
+    "Codec name = %s,  caps=0x%x, codec id=%d, thread_count=%d, thread_type=%d, active_thread_type=%d, delay=%d, gop=%d, has_b_frames=%d, max_b_frames=%d",
+    mVideoCodec->name,
+    mVideoCodec->capabilities,
+    mVideoCodec->id,
     mVideoCodecContext->thread_count,
-    mVideoCodecContext->active_thread_count,
     mVideoCodecContext->thread_type,
     mVideoCodecContext->active_thread_type,
     mVideoCodecContext->delay,
-    mVideoCodecContext->has_b_frames);
-Debug(1,
-      "codec=%s caps=0x%x",
-      mVideoCodec->name,
-      mVideoCodec->capabilities);
-Debug(1,
-      "codec id=%d",
-      mVideoCodec->id);
-Debug(1, "Codec name = %s", mVideoCodec->name);
-Debug(1,
-      "gop=%d max_b_frames=%d has_b_frames=%d",
-      mVideoCodecContext->gop_size,
-      mVideoCodecContext->max_b_frames,
-      mVideoCodecContext->has_b_frames);
+    mVideoCodecContext->gop_size,
+    mVideoCodecContext->has_b_frames,
+    mVideoCodecContext->max_b_frames);
 
     e = nullptr;
     while ((e = av_dict_get(opts, "", e, AV_DICT_IGNORE_SUFFIX)) != nullptr) {

@@ -3207,7 +3207,6 @@ bool Monitor::Decode() {
       } else {
         // EAGAIN - no frame available yet.
         // The decoder still requires additional input packets.
-//        decoder_requires_next_packet = true;
         Debug(2, "Decoder needs additional input after packet %d (EAGAIN)", front_packet->image_index);
       }
     }  // end if needs_decoding
@@ -3294,10 +3293,8 @@ bool Monitor::Decode() {
       int fps = static_cast<int>(get_capture_fps());
       if (ret >= 0 && packet->keyframe && (decoding == DECODING_KEYFRAMES || (decoding == DECODING_KEYFRAMESONDEMAND && !hasViewers()))) {
         decoder_requires_next_packet = true;
-//        Debug(2, "Decoder requires follow-up packets after keyframe %d (EAGAIN=%s). Capture fps=%d, decoder queue push size=%zu", packet->image_index, (ret == 0) ? "true" : "false", fps, decoder_queue.size());
-        Debug(2, "Decoder requires follow-up packets after keyframe %d (EAGAIN=%s). Capture fps=%d, decoder queue push size=%zu, duration=%.3f, ret=%d", packet->image_index, (ret == 0) ? "true" : "false", fps, decoder_queue.size(), FPSeconds(endtime - starttime).count(), ret);
+        Debug(2, "Decoder requires follow-up packets after keyframe %d (EAGAIN=%s). Capture fps=%d, decoder queue size=%zu, duration=%.3f, ret=%d", packet->image_index, (ret == 0) ? "true" : "false", fps, decoder_queue.size(), FPSeconds(endtime - starttime).count(), ret);
       }
-//Debug(2, "Packet %d (EAGAIN=%s). Key=%d, Capture fps=%d, decoder queue push size=%zu, duration=%.3f, ret=%d", packet->image_index, (ret == 0) ? "true" : "false", packet->keyframe, fps, decoder_queue.size(), FPSeconds(endtime - starttime).count(), ret);
 
       Milliseconds warning_threshold;
       if (waiting_for_followup) {
