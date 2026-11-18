@@ -126,7 +126,7 @@ function probeV4L() {
 } # end function probeV4L
 
 function probeAxisCommunicationsAB($ip, $username, $password) {
-	return probeAxis($ip, $username, $password);
+  return probeAxis($ip, $username, $password);
 }
 
 // Probe Network Cameras
@@ -167,7 +167,7 @@ function probeAxis($ip, $username, $password) {
       }
     }
   } else {
-	  ZM\Debug("No content from $url");
+    ZM\Debug("No content from $url");
   }
   $cameras[] = $camera;
   return $cameras;
@@ -201,12 +201,10 @@ function probeActi($ip) {
     'ip'      => $ip,
     'Model'   => 'Acti Camera',
     'monitor' => array(
-      'Type'     => 'Remote',
-      'Protocol' => 'rtsp',
-      'Method'   => 'rtpUni',
-      'Host'     => 'Admin:123456@'.$ip,
-      'Port'     => 7070,
-      'Path'     => '',
+      // Was Type Remote with Protocol rtsp, which no longer captures now that
+      // ZoneMinder's own rtsp client is gone. Same stream, through ffmpeg.
+      'Type'     => 'Ffmpeg',
+      'Path'     => 'rtsp://Admin:123456@'.$ip.':7070',
       'Width'    => 320,
       'Height'   => 240,
     ),
@@ -253,7 +251,7 @@ function probeAmcrest($ip, $username='', $password='') {
 }
 
 function wget($method, $url, $username, $password) {
-  exec("wget --keep-session-cookies -O - $url", $output, $result_code);
+  exec('wget --keep-session-cookies -O - '.escapeshellarg($url), $output, $result_code);
   return implode("\n", $output);
 }
 
@@ -306,8 +304,8 @@ function curl($method, $url, $username, $password) {
     ZM\Debug($res);
     $status = curl_getinfo($ch);
     ZM\Debug(print_r($status, true));
-    curl_close($ch);
     $headerSize = curl_getinfo( $ch , CURLINFO_HEADER_SIZE );
+    curl_close($ch);
     $headerStr = substr( $res , 0 , $headerSize );
     $bodyStr = substr( $res , $headerSize );
     return $bodyStr;
@@ -495,6 +493,80 @@ function probeHikvision($ip, $username, $password) {
   return $cameras;
 }
 
+function probeZhejiangUniviewTechnologiesCoLtd($ip, $username, $password) {
+  return probeUniview($ip, $username, $password);
+}
+
+function probeUniview($ip, $username, $password) {
+  if (!$username) $username = 'admin';
+  if (!$password) $password = '123456';
+  $cameras = [];
+  $port_open = port_open($ip, 554);
+  $url = 'rtsp://'.$username.':'.urlencode($password).'@'.$ip.':554/media/video1';
+  $camera = array(
+    'ip'      => $ip,
+    'mjpegstream' => 'http://'.$username.':'.urlencode($password).'@'.$ip.'/LAPI/V1.0/Channels/0/Media/Video/Streams/0/Snapshot',
+    'Manufacturer'  => 'Uniview',
+    'Model'         => ($port_open ? 'Camera' : 'Not Camera'),
+    'monitor' =>  array(
+      'Type'  =>  'Ffmpeg',
+      'Path' => $url,
+      'Width'   =>  1920,
+      'Height'  =>  1080,
+      'Manufacturer'  => 'Uniview',
+    ),
+  );
+
+  $device_url = 'http://'.$ip.'/LAPI/V1.0/System/DeviceBasicInfo';
+  $json_str = curl('GET', $device_url, $username, $password);
+  if ($json_str) {
+    $device_info = json_decode($json_str, true);
+    if ($device_info && isset($device_info['Response'])) {
+      $data = $device_info['Response']['Data'];
+      if (!empty($data['DeviceModel'])) {
+        $camera['Model'] = $data['DeviceModel'];
+        $camera['monitor']['Model'] = $data['DeviceModel'];
+      }
+      if (!empty($data['DeviceName'])) {
+        $camera['Name'] = $data['DeviceName'];
+        $camera['monitor']['Name'] = $data['DeviceName'];
+      }
+    } else {
+      ZM\Debug("No valid JSON response from $device_url");
+    }
+  } else {
+    ZM\Debug("No response from $device_url");
+  }
+
+  $streams_url = 'http://'.$ip.'/LAPI/V1.0/Channels/0/Media/Video/Streams';
+  $json_str = curl('GET', $streams_url, $username, $password);
+  if ($json_str) {
+    $streams_info = json_decode($json_str, true);
+    if ($streams_info && isset($streams_info['Response']['Data']['StreamInfos'])) {
+      $stream_infos = $streams_info['Response']['Data']['StreamInfos'];
+      if (count($stream_infos) > 0) {
+        $main_stream = $stream_infos[0];
+        if (!empty($main_stream['Resolution']['Width'])) {
+          $camera['monitor']['Width'] = (int) $main_stream['Resolution']['Width'];
+        }
+        if (!empty($main_stream['Resolution']['Height'])) {
+          $camera['monitor']['Height'] = (int) $main_stream['Resolution']['Height'];
+        }
+        if (!empty($main_stream['Encode'])) {
+          $camera['Codec'] = $main_stream['Encode'];
+        }
+      }
+    } else {
+      ZM\Debug("No stream info from $streams_url");
+    }
+  } else {
+    ZM\Debug("No response from $streams_url");
+  }
+
+  $cameras[] = $camera;
+  return $cameras;
+}
+
 function probeUbiquitiNetworksInc($ip, $username, $password) {
   return probeUbiquiti($ip, $username, $password);
 }
@@ -536,12 +608,12 @@ function probeFoscam($ip, $username, $password) {
   $rtsp_port = 0;
   $http_port = 0;
   if (port_open($ip, 554)) {
-	  $rtsp_port = 554;
+    $rtsp_port = 554;
   }
   if (port_open($ip, 88)) {
-	  $http_port = 88;
+    $http_port = 88;
   } else if (port_open($ip, 80)) {
-	  $http_port = 80;
+    $http_port = 80;
   }
   if (!$rtsp_port) $rtsp_port = $http_port;
   $cameras = [];
@@ -847,14 +919,14 @@ function probeNetwork() {
       ZM\Debug("Have match for $ip $mac $macRoot ".$macBases[$macRoot]['type']);
       $macBase = $macBases[$macRoot];
       if ($filter_manufacturer and ($filter_manufacturer != $macBase['type'])) {
-	      ZM\Debug("Continuing because offilter $filter_manufacturer == ".$macBase['type']);
-	      continue;
+        ZM\Debug("Continuing because offilter $filter_manufacturer == ".$macBase['type']);
+        continue;
       } else {
-	      ZM\Debug("Not Continuing because offilter $filter_manufacturer != ".$macBase['type']);
+        ZM\Debug("Not Continuing because offilter $filter_manufacturer != ".$macBase['type']);
       }
       if (function_exists('probe'.$macBase['type'])) {
         if (!$username and isset($monitors[$ip])) {
-		$monitor = $monitors[$ip];
+          $monitor = $monitors[$ip];
           ZM\Debug("Using auth from monitor $ip ".$monitor->User().' '. $monitor->Pass());
           $new_cameras = call_user_func('probe'.$macBase['type'], $ip, $monitors[$ip]->User(), $monitors[$ip]->Pass());
           if (!$new_cameras) {
@@ -868,11 +940,13 @@ function probeNetwork() {
         }
       } else {
         ZM\Debug("No probe function for {$macBase['type']}");
-        $cameras[$mac] = [['ip'=>$ip, 'Manufacturer'=>$macBase['vendor']]];
+        $cameras[$mac] = [['ip'=>$ip, 'Manufacturer'=>$macBase['vendor'],
+          'monitor'=>['Type'=>'Ffmpeg', 'Path'=>'rtsp://'.$ip.'/']]];
       }
     } else {
       ZM\Debug("No match for $ip $macRoot");
-      $cameras[$mac] = [['ip'=>$ip, 'Manufacturer'=>'Unknown']];
+      $cameras[$mac] = [['ip'=>$ip, 'Manufacturer'=>'Unknown',
+        'monitor'=>['Type'=>'Ffmpeg', 'Path'=>'rtsp://'.$ip.'/']]];
     }
     if (connection_aborted()) exit();
   } # end foreach output line
@@ -910,12 +984,14 @@ function probeNetwork() {
               ZM\Debug("DIdn't find any cameras");
             }
           } else {
-            $cameras[$mac] += [['ip'=>$ip, 'Manufacturer'=>$macBase['vendor']]];
+            $cameras[$mac] += [['ip'=>$ip, 'Manufacturer'=>$macBase['vendor'],
+              'monitor'=>['Type'=>'Ffmpeg', 'Path'=>'rtsp://'.$ip.'/']]];
             ZM\Debug("No probe function for {$macBase['type']} {$macBase['vendor']}");
           }
         } else {
           ZM\Debug("No match for $macRoot");
-          $cameras[$mac] += [['ip'=>$ip, 'Manufacturer'=>'Unknown']];
+          $cameras[$mac] += [['ip'=>$ip, 'Manufacturer'=>'Unknown',
+            'monitor'=>['Type'=>'Ffmpeg', 'Path'=>'rtsp://'.$ip.'/']]];
         }
         if (connection_aborted()) exit();
       } # end foreach output line
@@ -945,7 +1021,7 @@ function probeNetwork() {
     }
 
     $results[] = [
-	    'mac' => $mac,
+      'mac' => $mac,
       'description' => $sourceString,
       'url'         => (isset($camera['monitor']) ? $camera['monitor']['Path'] : ''),
       'IP'          => $camera['ip'],

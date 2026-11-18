@@ -12,7 +12,9 @@ CSS_DEFAULT - ZoneMinder allows the use of many different web interfaces, and so
 
 LANG_DEFAULT - ZoneMinder allows the web interface to use languages other than English if the appropriate language file has been created and is present. This option allows you to change the default language that is used from the shipped language, British English, to another language.
 
-OPT_USE_AUTH - ZoneMinder can run in two modes. The simplest is an entirely unauthenticated mode where anyone can access ZoneMinder and perform all tasks. This is most suitable for installations where the web server access is limited in other ways. The other mode enables user accounts with varying sets of permissions. Users must login or authenticate to access ZoneMinder and are limited by their defined permissions. Authenticated mode alone should not be relied up for securing Internet connected ZoneMinder.
+OPT_USE_AUTH - ZoneMinder can run in two modes. The default mode enables user accounts with varying sets of permissions. Users must login or authenticate to access ZoneMinder and are limited by their defined permissions. The other is an entirely unauthenticated mode where anyone who can reach ZoneMinder, including any web page opened in a browser on the same network, can perform all tasks. Only turn this off where access to the web server is limited in other ways. New installs start with this on and ask on their first page whether to keep it; an upgrade keeps the value the install had. Authenticated mode alone should not be relied up for securing Internet connected ZoneMinder.
+
+PASSWORD_MIN_LENGTH - A password set from now on, on the user page, through the API or at login, must have at least this many characters (default 8). Existing passwords keep working. Length does more for a password than rules about character classes, which lead people to predictable variations, so there is no setting for those. 0 turns the check off; the password ``admin`` is refused whatever this says.
 
 AUTH_TYPE - ZoneMinder can use two methods to authenticate users when running in authenticated mode. The first is a builtin method where ZoneMinder provides facilities for users to log in and maintains track of their identity. The second method allows interworking with other methods such as http basic authentication which passes an independently authenticated 'remote' user via http. In this case ZoneMinder would use the supplied user without additional authentication provided such a user is configured in ZoneMinder.
 
@@ -23,6 +25,8 @@ AUTH_RELAY - When ZoneMinder is running in authenticated mode it can pass user d
 AUTH_HASH_SECRET - When ZoneMinder is running in hashed authenticated mode it is necessary to generate hashed strings containing encrypted sensitive information such as usernames and passwords. Although these strings are reasonably secure the addition of a random secret increases security substantially. Note that if you are using the new token based APIs, then this field is mandatory with ZM 1.34 and above.
 
 AUTH_HASH_IPS - When ZoneMinder is running in hashed authenticated mode it can optionally include the requesting IP address in the resultant hash. This adds an extra level of security as only requests from that address may use that authentication key. However in some circumstances, such as access over mobile networks, the requesting address can change for each request which will cause most requests to fail. This option allows you to control whether IP addresses are included in the authentication hash on your system. If you experience intermittent problems with authentication, switching this option off may help. It is recommended you keep this off if you use mobile apps like zmNinja over mobile carrier networks - several APNs change the IP very frequently which may result in authentication failures.
+
+AUTH_TRUSTED_PROXIES - A comma or space separated list of the exact IP addresses of reverse proxies in front of ZoneMinder, for example ``127.0.0.1``. The X-Forwarded-For header is only used to determine the client address bound into the hash by ``AUTH_HASH_IPS`` when the request comes directly from one of these addresses, and is then read from the right, skipping listed proxies, so values a client adds itself are ignored. When empty (the default) the header is ignored and the connecting address is used. If you enable ``AUTH_HASH_IPS`` behind a reverse proxy, list the proxy here, otherwise every client appears to come from the proxy's address.
 
 AUTH_HASH_TTL - Time before ZM auth will expire (does not apply to API tokens). The default has traditionally been 2 hours. A new hash will automatically be regenerated at half this value.
 
@@ -39,6 +43,19 @@ OPT_USE_LEGACY_AUTH - Starting version 1.34.0, ZoneMinder uses a more secure Aut
 OPT_USE_EVENT_NOTIFICATION - zmeventnotification is a 3rd party event notification server that is used to get notifications for alarms detected by ZoneMinder in real time. zmNinja requires this server for push notifications to mobile phones. This option only enables the server if it is already installed. Please visit the `Event Notification Server project site <https://github.com/pliablepixels/zmeventserver>`__ for installation instructions.
 
 OPT_USE_GOOG_RECAPTCHA - This option allows you to include a google reCaptcha validation at login. This means in addition to providing a valid username and password, you will also have to pass the reCaptcha test. Please note that enabling this option results in the zoneminder login page reaching out to google servers for captcha validation. Also please note that enabling this option may break 3rd party clients if they rely on web based logins (Note that zmNinja now uses the API based token method and will not be affected if reCAPTCHA is enabled). If you enable this, you also need to specify your site and secret key (please refer to context help in the ZoneMinder system screen).
+
+.. note:: With reCAPTCHA on, the login page refuses every login when the reCAPTCHA check can't
+   complete: a wrong site key, a browser that can't load the reCAPTCHA script, or a server that can't
+   reach ``www.google.com``. To turn reCAPTCHA off without the web UI, on the ZoneMinder server either:
+
+   * add a file to ``/etc/zm/conf.d``, for example ``99-no-recaptcha.conf``, containing
+     ``ZM_OPT_USE_GOOG_RECAPTCHA=0``. Values in ``conf.d`` override the database, so the next page
+     load shows the login page without reCAPTCHA. Once logged in, open Options > Authentication:
+     the box still shows the stored setting (ticked). Untick it, save, then remove the file;
+     otherwise reCAPTCHA returns when the file is removed. Or
+   * change the stored setting in the database, with the database name and credentials from
+     ``/etc/zm/zm.conf`` (``zm`` and ``zmuser`` by default):
+     ``mysql -u zmuser -p zm -e "UPDATE Config SET Value='0' WHERE Name='ZM_OPT_USE_GOOG_RECAPTCHA'"``
 
 SYSTEM_SHUTDOWN - this option puts a poweroff icon in the header of the ZM UI for users with System privilege accessi. This icon will allow the user to shutdown the full system via the ZM UI. The system will need to have sudo installed and the following added to /etc/sudoers:
 

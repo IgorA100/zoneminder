@@ -44,12 +44,19 @@ class User {
   Permission control;
   Permission monitors;
   Permission system;
+  int role_id;
 
   bool group_permissions_loaded;
   std::vector<Group_Permission> group_permissions;
 
   bool monitor_permissions_loaded;
   std::map<int, Monitor_Permission> monitor_permissions;
+
+  bool role_group_permissions_loaded;
+  std::vector<Group_Permission> role_group_permissions;
+
+  bool role_monitor_permissions_loaded;
+  std::map<int, Monitor_Permission> role_monitor_permissions;
 
  public:
   User();
@@ -78,6 +85,9 @@ class User {
 
   void loadMonitorPermissions();
   void loadGroupPermissions();
+  void loadRoleBasePermissions();
+  void loadRoleMonitorPermissions();
+  void loadRoleGroupPermissions();
 };
 
 User *zmLoadUser(const std::string&username, const std::string &password="");
@@ -85,5 +95,8 @@ User *zmLoadAuthUser(const std::string &auth, const std::string &user, bool use_
 User *zmLoadTokenUser(const std::string &jwt, bool use_remote_addr);
 bool checkUser(const std::string &username);
 bool checkPass(const std::string &password);
+// True for the password db/zm_create.sql gives the admin account ("admin").
+// zmLoadUser() refuses it: the web login asks for a new one first.
+bool isDefaultPassword(const std::string &password);
 
 #endif // ZM_USER_H

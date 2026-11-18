@@ -21,6 +21,7 @@
 #define ZM_TIME_H
 
 #include <chrono>
+#include <cstdint>
 #include <string>
 #include <sys/time.h>
 
@@ -121,6 +122,14 @@ class TimeSegmentAdder {
   bool finished_;
 };
 
+// Current wall-clock time (CLOCK_REALTIME) in unix-epoch microseconds.
+inline uint64_t SystemClockMicros() {
+  return std::chrono::duration_cast<Microseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+std::string format_absolute_time_iso8601(time_t time);
 std::string SystemTimePointToString(SystemTimePoint tp);
 std::string SystemTimePointToMysqlString(SystemTimePoint tp);
 std::string TimePointToString(TimePoint tp);

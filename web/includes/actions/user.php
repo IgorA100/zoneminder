@@ -40,6 +40,12 @@ if ($action == 'Save') {
     if (isset($_REQUEST['user']['MonitorIds']) and is_array($_REQUEST['user']['MonitorIds']))
       $_REQUEST['user']['MonitorIds'] = implode(',', $_REQUEST['user']['MonitorIds']);
     if (!empty($_REQUEST['user']['Password'])) {
+      $problem = passwordProblem($_REQUEST['user']['Password']);
+      if ($problem !== null) {
+        $error_message .= passwordProblemText($problem).'<br/>';
+        unset($_REQUEST['redirect']);
+        return;
+      }
       $_REQUEST['user']['Password'] = password_hash($_REQUEST['user']['Password'], PASSWORD_BCRYPT);
     } else {
       unset($_REQUEST['user']['Password']);
@@ -60,6 +66,7 @@ if ($action == 'Save') {
         unset($_REQUEST['redirect']);
         return;
       }
+      ZM\AuditAction(($uid ? 'update' : 'create'), 'user', $dbUser->Id(), 'Username: '.$dbUser->Username().' Changed: '.implode(', ', array_keys($changes)));
 
       if ($uid) {
         if ($user and ($dbUser->Username() == $user->Username())) {
@@ -98,6 +105,12 @@ if ($action == 'Save') {
     $dbUser->Monitor_Permissions(null); # reload
   } else if (ZM_USER_SELF_EDIT and ($uid == $user->Id())) {
     if (!empty($_REQUEST['user']['Password'])) {
+      $problem = passwordProblem($_REQUEST['user']['Password']);
+      if ($problem !== null) {
+        $error_message .= passwordProblemText($problem).'<br/>';
+        unset($_REQUEST['redirect']);
+        return;
+      }
       $_REQUEST['user']['Password'] = password_hash($_REQUEST['user']['Password'], PASSWORD_BCRYPT);
     } else {
       unset($_REQUEST['user']['Password']);
@@ -120,6 +133,7 @@ if ($action == 'Save') {
         unset($_REQUEST['redirect']);
         return;
       }
+      ZM\AuditAction('self_update', 'user', $dbUser->Id(), 'Changed: '.implode(', ', array_keys($changes)));
 
       # We are the logged in user, need to update the $user object and generate a new auth_hash
       $user = ZM\User::find_one(['Enabled'=>1, 'Id'=>$uid]);
