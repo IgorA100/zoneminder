@@ -169,6 +169,12 @@ class VideoStore {
                                 int64_t init_segment_end,
                                 bool is_complete);
   static std::string m3u8Fragment(const Fragment &frag, const std::string &video_url);
+  // Scan a finalized fragmented MP4 on disk from `first_moof` to the media end
+  // (mfra or EOF) and populate `out` with byte ranges and sample-accurate
+  // durations. Returns false without modifying `out` if the file is not a
+  // supported fragmented MP4 or any fragment fails validation.
+  static bool fragmentsFromFile(const std::string &path, int64_t first_moof,
+                                std::vector<Fragment> *out);
   // Flush queues, write trailer, close output, and record the final fragment.
   // Call this before writeM3U8(true) so the manifest contains every fragment.
   // Safe to call once; subsequent calls are no-ops. The destructor will skip
