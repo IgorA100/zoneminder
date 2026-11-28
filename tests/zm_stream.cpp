@@ -36,9 +36,12 @@
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
+#include <zlib.h>
 
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -53,6 +56,8 @@ class TestStream : public StreamBase {
   Image *prepare(Image *image, int pre_scaled_by = 0) {
     return prepareImage(image, pre_scaled_by);
   }
+  size_t zip(const Image &image) { return zipImageToTempBuffer(image); }
+  const uint8_t *tempBuffer() const { return temp_img_buffer; }
   int preScale(int base_width, int base_height, int &width, int &height) {
     return preScaleDimensions(base_width, base_height, width, height);
   }
@@ -225,6 +230,28 @@ TEST_CASE("StreamBase comms are named after the stream's owner") {
   }
   rmdir(dir.c_str());
 }
+
+#if HAVE_ZLIB_H
+TEST_CASE("StreamBase zips an image that does not compress into a large enough buffer") {
+  // A random picture is larger once compressed than raw, so a buffer of Size() bytes is too small.
+  if (!config.font_file_location) config.font_file_location = "";
+  Image image(64, 64, ZM_COLOUR_GRAY8, ZM_SUBPIX_ORDER_NONE);
+  unsigned int seed = 12345;
+  for (unsigned int i = 0; i < image.Size(); i++) {
+    seed = seed * 1103515245u + 12345u;
+    image.Buffer()[i] = static_cast<uint8_t>(seed >> 16);
+  }
+  TestStream stream;
+  size_t zipped = stream.zip(image);
+  REQUIRE(zipped > 0);
+  REQUIRE(zipped <= compressBound(image.Size()));
+  std::vector<uint8_t> out(image.Size());
+  uLongf out_len = out.size();
+  REQUIRE(uncompress(out.data(), &out_len, stream.tempBuffer(), zipped) == Z_OK);
+  REQUIRE(out_len == image.Size());
+  REQUIRE(std::memcmp(out.data(), image.Buffer(), image.Size()) == 0);
+}
+#endif
 
 TEST_CASE("StreamBase::prepareImage pre-scaled frames") {
   // zms used to colour convert an mp4 frame to full size RGBA and then scale
@@ -588,6 +615,53 @@ TEST_CASE("StreamBase::setStreamReplayRate treats 0 as normal speed", "[StreamBa
   CHECK(stream.replayRate() == ZM_RATE_BASE);
   stream.setStreamReplayRate(-200);
   CHECK(stream.replayRate() == -200);
+}
+
+TEST_CASE("StreamBase: the quality= parameter of zms", "[StreamBase]") {
+  REQUIRE(StreamBase::ParseQualityParam("50") == 50);
+  REQUIRE(StreamBase::ParseQualityParam("1") == 1);
+  REQUIRE(StreamBase::ParseQualityParam("100") == 100);
+  // Out of range or not a number keeps the configured quality.
+  REQUIRE(StreamBase::ParseQualityParam("0") == 0);
+  REQUIRE(StreamBase::ParseQualityParam("101") == 0);
+  REQUIRE(StreamBase::ParseQualityParam("-5") == 0);
+  REQUIRE(StreamBase::ParseQualityParam("high") == 0);
+}
+
+TEST_CASE("StreamBase: a stream's JPEGs are encoded at its quality", "[StreamBase]") {
+  // A client on a slow link asks for quality=10 to cut the bandwidth of a
+  // stream; without it every stream used ZM_JPEG_STREAM_QUALITY.
+  EnsureImageInit();
+  const unsigned int kWidth = 320;
+  const unsigned int kHeight = 240;
+  Image image(kWidth, kHeight, ZM_COLOUR_RGB24, ZM_SUBPIX_ORDER_RGB);
+  // Detail for the encoder to spend bits on.
+  uint8_t *buf = image.WriteBuffer(kWidth, kHeight, ZM_COLOUR_RGB24, ZM_SUBPIX_ORDER_RGB);
+  for (unsigned int i = 0; i < kWidth * kHeight * 3; i++) buf[i] = static_cast<uint8_t>((i * 7919u) ^ (i >> 5));
+
+  auto encoded_size = [&image](int quality) {
+    TestStream stream;
+    stream.setStreamQuality(quality);
+    std::vector<unsigned char> out(1 << 20);
+    size_t size = out.size();
+    REQUIRE(stream.encodeJpeg(image, out.data(), &size));
+    return size;
+  };
+
+  const int saved = config.jpeg_stream_quality;
+  config.jpeg_stream_quality = 90;
+  const size_t low = encoded_size(10);
+  const size_t high = encoded_size(90);
+  const size_t unset = encoded_size(0);
+  config.jpeg_stream_quality = saved;
+
+  REQUIRE(low < high / 2);
+  // No quality given means the configured one.
+  REQUIRE(unset == high);
+
+  TestStream stream;
+  stream.setStreamQuality(250);
+  REQUIRE(stream.streamQuality() == 0);
 }
 
 TEST_CASE("StreamBase::updateFrameRate with an unbounded maxfps", "[StreamBase]") {

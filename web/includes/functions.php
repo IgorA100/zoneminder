@@ -2009,7 +2009,8 @@ function monitorFormUncheckedDefaults() {
       'MQTT_Enabled'  =>  0,
       'RTSPServer' => 0,
       'SectionLengthWarn' => 0,
-      'SOAP_wsa_compl' => 0
+      'SOAP_wsa_compl' => 0,
+      'ONVIF_Event_Tags' => 0
       );
 
   # The Control tab is only drawn with ZM_OPT_CONTROL and View permission on
@@ -2494,7 +2495,7 @@ function get_subnets($interface) {
   return $subnets;
 } # end function get_subnets($interface)
 
-function extract_auth_values_from_url($url) {
+function extract_auth_values_from_url($url, &$authEnd = null) {
   $protocolPrefixPos = strpos($url, '://');
   if ($protocolPrefixPos === false)
     return array();
@@ -2537,6 +2538,7 @@ function extract_auth_values_from_url($url) {
   $username = rawurldecode($username);
   $password = rawurldecode($password);
 
+  $authEnd = $authSeparatorPos;
   return array( $username, $password );
 }
 

@@ -33,6 +33,10 @@
 constexpr Seconds StreamBase::MAX_STREAM_DELAY;
 constexpr Milliseconds StreamBase::MAX_SLEEP;
 
+bool StreamBase::encodeJpeg(const Image &image, unsigned char *buffer, size_t *size) const {
+  return image.EncodeJpeg(buffer, size, quality);
+}
+
 StreamBase::~StreamBase() {
   delete vid_stream;
   delete[] temp_img_buffer;
@@ -402,7 +406,7 @@ bool StreamBase::sendTextFrame(const char *frame_text) {
     static unsigned char buffer[ZM_MAX_IMAGE_SIZE];
     size_t n_bytes = 0;
 
-    image.EncodeJpeg(buffer, &n_bytes);
+    encodeJpeg(image, buffer, &n_bytes);
 
     if (type == STREAM_JPEG || type == STREAM_RAW || type == STREAM_ZIP) {
       if (0 > fputs("--" BOUNDARY "\r\n", stdout)) {
@@ -556,6 +560,18 @@ void StreamBase::closeComms() {
     }
   }
 } // end void StreamBase::closeComms
+
+size_t StreamBase::zipImageToTempBuffer(const Image &image) {
+#if HAVE_ZLIB_H
+  // compress2 writes up to compressBound() bytes, which is more than the image when it does not compress.
+  unsigned long zip_buffer_size = compressBound(image.Size());
+  reserveTempImgBuffer(zip_buffer_size);
+  if (!image.Zip(temp_img_buffer, &zip_buffer_size)) return 0;
+  return zip_buffer_size;
+#else
+  return 0;
+#endif // HAVE_ZLIB_H
+}
 
 void StreamBase::reserveTempImgBuffer(size_t size) {
   if (temp_img_buffer_size < size) {
