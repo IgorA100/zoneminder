@@ -80,6 +80,7 @@ $SLANG = array(
     '24BitColour'           => '24 bit colour',
     '32BitColour'           => '32 bit colour',
     '8BitGrey'              => '8 bit greyscale',
+    'AddAlias'              => 'Add alias, then Enter',
     'AddNewClass'           => 'Add New Class',
     'AddNewControl'         => 'Add New Control',
     'AddNewDataset'         => 'Add New Dataset',
@@ -103,6 +104,7 @@ $SLANG = array(
     'AlarmPx'               => 'Alarm Px',
     'AlarmRefImageBlendPct' => 'Alarm Reference Image Blend %ge',
     'AlarmRGBUnset'         => 'You must set an alarm RGB colour',
+    'Aliases'               => 'Aliases',
     'All'                   => 'All',
     'AllTokensRevoked'      => 'All Tokens Revoked',
     'AnalysisFPS'           => 'Analysis FPS',
@@ -322,6 +324,7 @@ $SLANG = array(
     'ChooseLogFormat'       => 'Choose a log format',
     'ChooseLogSelection'    => 'Choose a log selection',
     'ChoosePreset'          => 'Choose Preset',
+    'ClassIndexInUse'       => 'Index %1$s is already used by %2$s in this dataset',
     'ClassLabel'            => 'Label',
     'ClearLogs'             => 'Clear Logs',
     'CloneMonitor'          => 'Clone',
@@ -610,6 +613,7 @@ $SLANG = array(
     'NewPasswordRequired'   => 'Enter a new password.',
     'NewState'              => 'New State',
     'NewUser'               => 'New User',
+    'NextFreeIndex'         => 'Next free',
     'NextFrame'             => 'Next Frame',
     'NextMonitor'           => 'Next Monitor',
     'NoDetectedCameras'     => 'No Detected Cameras',
@@ -648,6 +652,7 @@ $SLANG = array(
     'ONVIF'                 => 'ONVIF',
     'ONVIF_Alarm_Text'      => 'ONVIF Alarm Text',
     'ONVIF_Event_Listener'  => 'ONVIF Event Listener',
+    'ONVIF_Event_Tags'      => 'Tag Events From ONVIF',
     'ONVIF_EVENTS_PATH'     => 'ONVIF Events Path',
     'ONVIF_Options'         => 'ONVIF Options',
     'ONVIF_URL'             => 'ONVIF URL',
@@ -786,6 +791,7 @@ $SLANG = array(
     'RequestMissing'        => 'The request is missing',
     'RequiresAudioMotionEnabled' => 'Requires installation of the file "skins/classic/assets/audioMotion-analyzer/src/audioMotion-analyzer.js"',
     'ResetEventCounts'      => 'Reset Event Counts',
+    'Restart'               => 'Restart',
     'RestrictedCameraIds'   => 'Restricted Camera Ids',
     'RestrictedMonitors'    => 'Restricted Monitors',
     'ResumeAll'             => 'Resume All',
@@ -1330,6 +1336,17 @@ Always: A zmc process will run and immediately connect and stay connected.~~~~
      The required version is reported below this setting, and is set by SUPPORTED_AUDIO_MOTION_ANALYZER_VERSION in skins/classic/js/audioMotionAnalyzer.js.
      ',
     ),
+  'OPTIONS_WALL_CLOCK_TIMESTAMPS' => array(
+    'Help' => 'Controls where ZoneMinder gets the timing for each frame when writing a video file: from the camera\'s video stream itself or from the server\'s system clock.~~~~'
+            . '- Off (Default - recommended for most cameras): ZoneMinder uses the original timestamps (PTS/DTS) embedded in the stream by the camera. This ensures smooth playback with consistent frame intervals, avoids distortion from network delays, and properly supports B-frames.~~'
+            . '- On: ZoneMinder ignores the camera\'s stream timestamps and assigns each frame the server\'s system clock time at the exact moment the packet arrives.~~~~'
+            . 'When to enable this option:~~'
+            . '- Your camera has buggy firmware that sends broken, jumping, or duplicate timestamps (causing \'non increasing dts\' warnings in logs, dropped recordings, or unplayable files).~~'
+            . '- The camera\'s internal clock drifts significantly (e.g., a 10-minute real-time recording plays back as 7 or 13 minutes).~~~~'
+            . 'Important caveats when enabled:~~'
+            . '- Over unstable networks (such as Wi-Fi or congested links), playback may appear slightly jittery because network packet delays are baked directly into frame timings.~~'
+            . '- Not recommended for streams containing B-frames in Passthrough mode, as presentation timestamps (PTS) are forced equal to decoding timestamps (DTS).'
+  ),
   'FUNCTION_ANALYSIS_ENABLED' => array(
     'Help' => '
       When to perform motion detection on the captured video.  
@@ -1416,6 +1433,19 @@ None: No frames will be decoded, live view and thumbnails will not be available~
      Disable it if you receive an error ~~~ Couldnt do Renew Error 12 ActionNotSupported
      <env:Text>The device do NOT support this feature</env:Text> ~~~ when trying to enable/use ONVIF ~~it may
      help to get it to work... it is confirmed to work in some chinese cameras that do not implement ONVIF entirely
+    '
+   ),
+   'OPTIONS_ONVIF_Event_Tags' => array(
+    'Help' => '
+     Tag events raised by the ONVIF event listener with what the camera detected.~~
+     Object detections from the camera become the same tags object detection uses:
+     person, vehicle, animal, package, face, and doorbell for a doorbell press.~~
+     What a camera calls each object is set in Options, AI Classes, as the class
+     Aliases (PeopleDetect and Human are aliases of person). Add the words your
+     camera uses there. Saving a class restarts the monitors that tag events.~~
+     An alarm that names no object, such as plain motion or tampering, is tagged with
+     the name of its topic, for example MotionAlarm.~~
+     With this on, the event note just says ONVIF, as the tags say what was detected.
     '
    ),
    'OPTIONS_ONVIF_Alarm_Text' => array(

@@ -1218,13 +1218,16 @@ bool EventStream::sendFrame(Microseconds delta_us) {
       switch ( type ) {
       case STREAM_SINGLE :
       case STREAM_JPEG :
-        send_image->EncodeJpeg(img_buffer, &img_buffer_size);
+        encodeJpeg(*send_image, img_buffer, &img_buffer_size);
         fputs("Content-Type: image/jpeg\r\n", stdout);
         break;
       case STREAM_ZIP :
-        unsigned long zip_buffer_size;
-        send_image->Zip(img_buffer, &zip_buffer_size);
-        img_buffer_size = zip_buffer_size;
+        img_buffer_size = zipImageToTempBuffer(*send_image);
+        img_buffer = temp_img_buffer;
+        if (!img_buffer_size) {
+          Error("Unable to compress the image");
+          return false;
+        }
         fputs("Content-Type: image/x-rgbz\r\n", stdout);
         break;
       case STREAM_RAW :

@@ -30,6 +30,8 @@ App::uses('CrudControllerTrait', 'Crud.Lib');
  * @package           app.Controller
  * @link              https://book.cakephp.org/2.0/en/controllers.html#the-app-controller
  */
+// Cake and the controllers set components such as $this->FilterComponent as properties; PHP 8.2 deprecates that.
+#[\AllowDynamicProperties]
 class AppController extends Controller {
   use CrudControllerTrait;
 
@@ -319,5 +321,17 @@ class AppController extends Controller {
       return isset($event['MonitorId']) and in_array($event['MonitorId'], $allowed);
     }));
     return $row;
+  }
+
+  # Paginator uses sort as an array key and lowercases direction, so a list for either, from the
+  # query string or a named parameter, is a TypeError.
+  protected function requireScalarSort() {
+    foreach (array($this->request->params['named'], $this->request->query) as $params) {
+      foreach (array('sort', 'direction') as $key) {
+        if (isset($params[$key]) and !is_string($params[$key])) {
+          throw new BadRequestException($key.' must be a single value');
+        }
+      }
+    }
   }
 }

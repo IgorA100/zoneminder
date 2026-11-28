@@ -42,6 +42,20 @@ static void Forbidden(bool nph) {
   fputs("Status: 403 Forbidden\r\n\r\n", stdout);
 }
 
+// Splits "name=value" in place at the first '=' and returns the name (nullptr
+// when there is none). A later '=' belongs to the value, so a password such as
+// "a=b" is not cut short. A parameter without '=' has an empty value.
+char *zms_split_param(char *param, const char *&value) {
+  value = "";
+  if (!param || !*param || *param == '=') return nullptr;
+  char *equals = strchr(param, '=');
+  if (equals) {
+    *equals = '\0';
+    value = equals + 1;
+  }
+  return param;
+}
+
 bool ValidateAccess(User *user, int mon_id) {
   bool allowed = true;
 
@@ -106,6 +120,7 @@ int main(int argc, const char *argv[], char **envp) {
   unsigned int rate = 100;
   double maxfps = 0.0;
   unsigned int bitrate = 100000;
+  int quality = 0;
   unsigned int ttl = 0;
   bool  analysis_frames = false;
   EventStream::StreamMode replay = EventStream::MODE_NONE;
@@ -166,12 +181,10 @@ int main(int argc, const char *argv[], char **envp) {
   }
 
   for ( int p = 0; p < parm_no; p++ ) {
-    char *name = strtok(parms[p], "=");
+    char const *value = "";
+    char *name = zms_split_param(parms[p], value);
     if ( !name )
       continue;
-    char const *value = strtok(nullptr, "=");
-    if ( !value )
-      value = "";
     if ( !strcmp(name, "analysis") ) {
       if ( !strcmp(value, "true") ) {
         analysis_frames = true;
@@ -253,6 +266,8 @@ int main(int argc, const char *argv[], char **envp) {
       maxfps = atof(value);
     } else if ( !strcmp(name, "bitrate") ) {
       bitrate = atoi(value);
+    } else if ( !strcmp(name, "quality") ) {
+      quality = StreamBase::ParseQualityParam(value);
     } else if ( !strcmp(name, "ttl") ) {
       ttl = atoi(value);
     } else if ( !strcmp(name, "replay") ) {
@@ -411,6 +426,7 @@ int main(int argc, const char *argv[], char **envp) {
   if ( source == ZMS_MONITOR ) {
     MonitorStream stream;
     stream.setStreamScale(scale);
+    stream.setStreamQuality(quality);
     stream.setStreamReplayRate(rate);
     stream.setStreamMaxFPS(maxfps);
     stream.setStreamTTL(ttl);
@@ -443,6 +459,7 @@ int main(int argc, const char *argv[], char **envp) {
   } else if ( source == ZMS_EVENT ) {
     EventStream stream;
     stream.setStreamScale(scale);
+    stream.setStreamQuality(quality);
     stream.setStreamReplayRate(rate);
     stream.setStreamMaxFPS(maxfps);
     stream.setStreamMode(replay);

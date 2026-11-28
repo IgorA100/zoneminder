@@ -42,6 +42,11 @@ const char * Event::frame_type_names[3] = { "Normal", "Bulk", "Alarm" };
 
 int Event::pre_alarm_count = 0;
 
+std::string EventNameOnCloseSql(const std::string &prefix, uint64_t id) {
+  return stringtf("IF(Name='New Event', CONCAT(LEFT('%s', %d), '%" PRIu64 "'), Name)",
+                  zmDbEscapeString(prefix).c_str(), EventNamePrefixLength(id), id);
+}
+
 Event::PreAlarmData Event::pre_alarm_data[MAX_PRE_ALARM_FRAMES] = {};
 
 Event::Event(
@@ -161,13 +166,19 @@ Event::Event(
                       monitor->Latitude(),
                       monitor->Longitude()
                     );
-  // zmDbDoInsert returns 0 on a failure it will not retry itself, so back off and give up after a few tries
+  // zmDbDoInsert returns 0 on a failure it will not retry itself. Recording
+  // matters more than the row, so after a few tries record under a time-based
+  // id and leave the row to zmrecover.pl, which gives it a normal id. Shutting
+  // down leaves no time to retry, but the frames still need an id to go under.
   int insert_attempts = 0;
   do {
     id = zmDbDoInsert(sql);
-    if (id or zm_terminate) break;
-    if (++insert_attempts >= 10) {
-      Error("Unable to insert event after %d attempts", insert_attempts);
+    if (id) break;
+    if (++insert_attempts >= 3 or zm_terminate) {
+      id = EventFallbackId(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count(), monitor->Id());
+      Error("Unable to insert event for monitor %u after %d attempts, recording it as event %" PRIu64
+          " without a database row. Run zmrecover.pl to add it.", monitor->Id(), insert_attempts, id);
       break;
     }
     sleep(1);
@@ -342,12 +353,12 @@ Event::~Event() {
   // Conditionally update Name only if it hasn't been changed by the user during recording.
   std::string sql = stringtf(
       "UPDATE Events SET"
-      " Name = IF(Name='New Event', CONCAT(LEFT('%s', %d), '%" PRIu64 "'), Name),"
+      " Name = %s,"
       " EndDateTime = from_unixtime(%jd), Length = %.2f, Frames = %d,"
       " AlarmFrames = %d, TotScore = %d, AvgScore = %d, MaxScore = %d,"
       " MaxScoreFrameId=%d, DefaultVideo='%s', DiskSpace=%" PRIu64
       " WHERE Id = %" PRIu64,
-      monitor->Substitute(monitor->EventPrefix(), start_time).c_str(), EventNamePrefixLength(id), id,
+      EventNameOnCloseSql(monitor->Substitute(monitor->EventPrefix(), start_time), id).c_str(),
       static_cast<intmax_t>(std::chrono::system_clock::to_time_t(end_time.load())),
       delta_time.count(),
       frames.load(), alarm_frames.load(),
@@ -485,6 +496,32 @@ void Event::updateNotes(const StringSetMap &newNoteSetMap) {
   }  // end if update
 }  // void Event::updateNotes(const StringSetMap &newNoteSetMap)
 
+// Link the tag called name to this event, creating the tag when it is new. Each
+// name is linked once per event.
+void Event::AddTag(const std::string &name, SystemTimePoint assigned_on) {
+  const std::string tag_name = Utf8Truncate(name, 64);  // Tags.Name is 64 characters
+  if (tag_name.empty()) return;
+  {
+    // Each name is tried once per event, so one that can't be saved is not
+    // retried on every frame. The lock is not held over the database work.
+    std::lock_guard<std::mutex> lck(tags_mutex_);
+    if (!tags.insert(tag_name).second) return;
+  }
+
+  std::unique_ptr<Tag> tag(Tag::find(tag_name));
+  if (!tag) {
+    tag = std::make_unique<Tag>();
+    tag->Name(tag_name);
+    if (!tag->save()) {
+      Error("Unable to create tag %s for event %" PRIu64, tag_name.c_str(), id);
+      return;
+    }
+    Debug(1, "Created new Tag %s", tag_name.c_str());
+  }
+  Event_Tag(tag->Id(), id, assigned_on).save();
+  Debug(1, "Tagged event %" PRIu64 " with %s", id, tag_name.c_str());
+}
+
 void Event::AddPacket_(const std::shared_ptr<ZMPacket>packet) {
   // Ask the videostore rather than the monitor: when the monitor wanted ENCODE
   // but no encoder would open, it has fallen back to copying packets, and those
@@ -526,35 +563,7 @@ void Event::AddPacket_(const std::shared_ptr<ZMPacket>packet) {
     for (auto it = packet->detections.begin(); it != packet->detections.end(); ++it) {
       auto detection = *it;
       Debug(1, "detection %s", detection.dump().c_str());
-      std::string cls = detection["class"];
-      Tag *tag = nullptr;
-      auto tag_it = tags.find(cls);
-      if (tag_it == tags.end()) {
-        Debug(1, "Tag not found %s", cls.c_str());
-        tag = Tag::find(cls);
-        if (!tag) {
-          tag = new Tag();
-          tag->Name(cls);
-          tag->save();
-          Debug(1, "Created new Tag %s", cls.c_str());
-          tags.emplace(std::make_pair(cls, *tag));
-          uint64_t tag_id = tag->Id();
-          delete tag;  // Delete after copying into map
-          tag = nullptr;
-
-          if (tag_id) {
-            // Store
-            Event_Tag event_tag(tag_id, id, packet->timestamp);
-            event_tag.save();
-          }
-        } else {
-          Debug(1, "Found tag for %s", cls.c_str());
-        }
-
-      } else {
-        Debug(1, "Already have tag %s", cls.c_str());
-        tag = &(tag_it->second);
-      }
+      AddTag(detection["class"].get<std::string>(), packet->timestamp);
     }  // end foreach detection
   } else {
     Debug(3, "Detections is empty.");
@@ -858,7 +867,7 @@ void Event::Run() {
     // Try another
     Warning("Failed creating event dir at %s", storage->Path());
 
-    std::string sql = stringtf("SELECT `Id` FROM `Storage` WHERE `Id` != %u", storage->Id());
+    std::string sql = stringtf("SELECT `Id` FROM `Storage` WHERE `Enabled` AND `Id` != %u", storage->Id());
     if (monitor->ServerId())
       sql += stringtf(" AND ServerId=%u", monitor->ServerId());
 
@@ -879,9 +888,10 @@ void Event::Run() {
     if (!storage) {
       Info("No valid local storage area found.  Trying all other areas.");
       // Try remote
-      sql = "SELECT `Id` FROM `Storage` WHERE ServerId IS NULL";
+      sql = "SELECT `Id` FROM `Storage` WHERE `Enabled` AND (ServerId IS NULL";
       if (monitor->ServerId())
         sql += stringtf(" OR ServerId != %u", monitor->ServerId());
+      sql += ")";
 
       result = zmDbFetch(sql);
       if (result) {

@@ -44,6 +44,7 @@ set(TEST_SOURCES
   zm_monitor_shared_value.cpp
   zm_monitor_check_action.cpp
   zmu_helpers.cpp
+  zm_zms_params.cpp
   zm_monitor_ondemand.cpp
   zm_monitor_privacy.cpp
   zm_monitor_substitute.cpp
@@ -65,6 +66,7 @@ set(TEST_SOURCES
   zm_onvif_alarm_latch.cpp
   zm_onvif_alarm_termination.cpp
   zm_onvif_auth_error.cpp
+  zm_onvif_event_note.cpp
   zm_onvif_max_alarm.cpp
   zm_onvif_options.cpp
   zm_onvif_poll_wait.cpp

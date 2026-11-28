@@ -207,6 +207,22 @@ class FilterComponent extends Component {
         if (is_array($value) and $operator != '' and !in_array($operator, array('=', '!=', '<>', 'IN'))) {
           throw new BadRequestException('Invalid value for '.$operator.': array');
         }
+        // CakePHP writes a one-element list as Field = (v) unless the key ends in IN, NOT or !=, so
+        // Field = and Field <> would come out as "Field = = (v)" and "Field <> = (v)". The bare field
+        // and != give IN and NOT IN for any length.
+        if (is_array($value) and $operator == '=') {
+          $operator = '';
+        } else if (is_array($value) and $operator == '<>') {
+          $operator = '!=';
+        }
+        // A list holds plain values; a list inside it would be written into the SQL as the word Array.
+        if (is_array($value)) {
+          foreach ($value as $term) {
+            if (is_array($term)) {
+              throw new BadRequestException('Invalid value for '.$matches['field'].': nested array');
+            }
+          }
+        }
         if (($operator == 'LIKE') and (false === strpos($value, '%'))) {
           $value = '%'.$value.'%';
         } else if ($operator == 'IN') {

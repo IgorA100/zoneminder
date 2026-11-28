@@ -697,6 +697,10 @@ switch ($name) {
               <label><?php echo translate('ONVIF_Event_Listener') ?></label>
               <?php echo html_radio('newMonitor[ONVIF_Event_Listener]', array('1'=>translate('Enabled'), '0'=>translate('Disabled')), $monitor->ONVIF_Event_Listener()); ?>
             </li>
+            <li class="ONVIF_Event_Tags">
+              <label><?php echo translate('ONVIF_Event_Tags'); echo makeHelpLink('OPTIONS_ONVIF_Event_Tags') ?></label>
+              <input type="checkbox" name="newMonitor[ONVIF_Event_Tags]" value="1"<?php echo $monitor->ONVIF_Event_Tags() ? ' checked="checked"' : '' ?>/>
+            </li>
 <?php if ($monitor->Id()) { ?>
             <li class="ONVIF_Status">
               <label><?php echo translate('ONVIF_Subscription') ?></label>
@@ -1358,7 +1362,7 @@ echo htmlSelect('newMonitor[OutputContainer]', $videowriter_containers, $monitor
 ?>
             </li>
             <li class="WallClockTimeStamps">
-              <label><?php echo translate('Use Wallclock Timestamps') ?></label>
+              <label><?php echo translate('Use Wallclock Timestamps'); echo makeHelpLink('OPTIONS_WALL_CLOCK_TIMESTAMPS') ?></label>
               <input type="checkbox" name="newMonitor[WallClockTimestamps]" value="1"<?php if ( $monitor->WallClockTimestamps() ) { ?> checked="checked"<?php } ?>/>
             </li>
             <li class="RecordAudio">
