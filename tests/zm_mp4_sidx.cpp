@@ -960,3 +960,39 @@ TEST_CASE("Mp4SidxFirstCtsNotOverwrittenBySubsequentTrunWithoutCts") {
   std::error_code ignored;
   std::filesystem::remove(path, ignored);
 }
+
+TEST_CASE("VideoStoreFragmentsFromFileCheck") {
+  for (const auto *fn : {"sidx-moof.mp4", "sidx-abs.mp4", "sidx-nomfra.mp4"}) {
+    auto p = fixture(fn);
+    auto raw = read_file(p);
+    auto bxs = top_level(raw);
+    int64_t f_moof = static_cast<int64_t>(offset_of(bxs, "moof"));
+    std::vector<VideoStore::Fragment> res;
+    REQUIRE(VideoStore::fragmentsFromFile(p.string(), f_moof, &res));
+    REQUIRE(res.size() == 3);
+    REQUIRE(res.front().offset == f_moof);
+
+    double total = 0.0;
+    size_t idx = 0;
+    for (size_t i = 0; i + 1 < bxs.size(); ++i) {
+      if (bxs[i].type == "moof" && bxs[i + 1].type == "mdat") {
+        REQUIRE(idx < res.size());
+        REQUIRE(res[idx].offset == static_cast<int64_t>(bxs[i].offset));
+        REQUIRE(res[idx].size == static_cast<int64_t>(bxs[i + 1].offset + bxs[i + 1].size - bxs[i].offset));
+        if (idx > 0) {
+          REQUIRE(res[idx].offset == res[idx - 1].offset + res[idx - 1].size);
+        }
+        total += res[idx].duration;
+        ++idx;
+      }
+    }
+    REQUIRE(idx == res.size());
+    REQUIRE(VideoStore::m3u8TargetDuration(res) >= 2);
+    if (std::string(fn) == "sidx-moof.mp4") {
+      REQUIRE(total == Approx(3.023).margin(0.01));
+    }
+  }
+  std::vector<VideoStore::Fragment> keep = {{100, 200, 1.5}};
+  REQUIRE_FALSE(VideoStore::fragmentsFromFile(fixture("sidx-moof.mp4").string(), 16, &keep));
+  REQUIRE(keep.size() == 1);
+}
